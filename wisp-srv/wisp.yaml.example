@@ -1,0 +1,19 @@
+# wisp.yaml.example
+# Copy to wisp.yaml and fill in your values
+
+server:
+  host: "127.0.0.1"
+  port: 8080
+
+database:
+  url: "postgres://localhost:5432/wisp"
+
+google:
+  clientId: "your-google-client-id"
+  clientSecret: "your-google-client-secret"
+
+polling:
+  intervalMinutes: 5
+
+classification:
+  confidenceThreshold: 0.5
