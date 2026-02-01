@@ -37,6 +37,7 @@ executable wisp-srv
         Http.Handlers.Health
         Http.Routes
         Http.Server
+        Infra.Db.Activity
         Infra.Db.Auth
         Infra.Db.Entity
         Infra.Db.Jobs
@@ -93,6 +94,8 @@ test-suite wisp-srv-test
         Http.Handlers.HealthSpec
         Http.Routes
         Http.Server
+        Infra.Db.Activity
+        Infra.Db.ActivitySpec
         Infra.Db.Auth
         Infra.Db.Migrations
         Infra.Db.MigrationsSpec
