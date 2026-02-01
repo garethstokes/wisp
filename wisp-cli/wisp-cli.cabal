@@ -1,0 +1,27 @@
+cabal-version: 3.0
+name:          wisp-cli
+version:       0.1.0.0
+synopsis:      Wisp personal assistant CLI
+license:       BSD-3-Clause
+author:        Gareth
+build-type:    Simple
+
+common warnings
+    ghc-options: -Wall -Wunused-packages
+
+executable wisp
+    import:           warnings
+    main-is:          Main.hs
+    hs-source-dirs:   app
+    default-language: GHC2021
+    default-extensions:
+        OverloadedStrings
+        LambdaCase
+    build-depends:
+        base >=4.17 && <5,
+        text,
+        aeson,
+        http-client,
+        http-client-tls,
+        optparse-applicative,
+        process
