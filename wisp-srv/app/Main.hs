@@ -1,5 +1,6 @@
 module Main where
 
+import Control.Concurrent.Async (async, link)
 import System.Environment (getArgs)
 import System.FilePath (takeDirectory, (</>))
 import App.Config (loadConfig)
@@ -7,6 +8,7 @@ import App.Env (buildEnv)
 import App.Monad (runApp)
 import Http.Server (startServer)
 import Infra.Db.Migrations (runMigrations)
+import Services.Scheduler (startPolling)
 
 main :: IO ()
 main = do
@@ -27,6 +29,11 @@ main = do
 
   putStrLn "Running migrations..."
   runApp env $ runMigrations migrationsPath
+
+  -- Start background polling
+  putStrLn "Starting background polling..."
+  pollingThread <- async $ startPolling env
+  link pollingThread
 
   putStrLn "Starting wisp-srv..."
   runApp env startServer
