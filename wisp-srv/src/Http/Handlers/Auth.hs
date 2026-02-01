@@ -1,6 +1,7 @@
 module Http.Handlers.Auth
   ( getGoogleAuth
   , getGoogleCallback
+  , getAuthStatus
   ) where
 
 import Control.Monad.IO.Class (liftIO)
@@ -16,7 +17,7 @@ import Web.Scotty.Trans (ActionT, json, status, queryParamMaybe, setHeader)
 import App.Monad (Env, getConfig)
 import App.Config (Config(..), ServerConfig(..), GoogleConfig(..))
 import Infra.Google.Auth (OAuthConfig(..), buildAuthUrl, exchangeCode, TokenResponse(..))
-import Infra.Db.Auth (saveToken)
+import Infra.Db.Auth (saveToken, getToken, AuthToken(..))
 
 -- Build OAuthConfig from app config
 mkOAuthConfig :: Config -> OAuthConfig
@@ -70,3 +71,20 @@ getGoogleCallback = do
               [ "status" .= ("authenticated" :: Text)
               , "expires_at" .= expiresAt
               ]
+
+-- Check auth status
+getAuthStatus :: ActionT (ReaderT Env IO) ()
+getAuthStatus = do
+  mtoken <- lift $ getToken "google"
+  case mtoken of
+    Nothing -> json $ object
+      [ "authenticated" .= False
+      ]
+    Just tok -> do
+      now <- liftIO getCurrentTime
+      let isValid = tokenExpiresAt tok > now
+      json $ object
+        [ "authenticated" .= isValid
+        , "provider" .= ("google" :: Text)
+        , "expires_at" .= tokenExpiresAt tok
+        ]

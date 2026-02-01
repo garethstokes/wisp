@@ -11,6 +11,7 @@ common warnings
 
 executable wisp-srv
     import:           warnings
+    ghc-options:      -threaded -rtsopts "-with-rtsopts=-N"
     main-is:          Main.hs
     hs-source-dirs:   app, src
     default-language: GHC2021
@@ -50,20 +51,15 @@ executable wisp-srv
         mtl,
         transformers,
         postgresql-simple,
-        async,
         http-client,
         http-client-tls,
         http-types,
         scotty,
-        wai,
-        warp,
         fast-logger,
-        neat-interpolation,
         NanoID,
         mwc-random,
         directory,
-        filepath,
-        uri-encode
+        filepath
 
 test-suite wisp-srv-test
     import:           warnings
@@ -120,12 +116,9 @@ test-suite wisp-srv-test
         mwc-random,
         postgresql-simple,
         scotty,
-        wai,
-        warp,
         directory,
         filepath,
         http-client,
         http-client-tls,
         http-types,
-        hspec,
-        uri-encode
+        hspec

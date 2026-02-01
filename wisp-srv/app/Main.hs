@@ -1,6 +1,7 @@
 module Main where
 
 import System.Environment (getArgs)
+import System.FilePath (takeDirectory, (</>))
 import App.Config (loadConfig)
 import App.Env (buildEnv)
 import App.Monad (runApp)
@@ -13,6 +14,10 @@ main = do
   let configPath = case args of
         [p] -> p
         _ -> "wisp.yaml"
+      configDir = takeDirectory configPath
+      migrationsPath = if null configDir
+                       then "migrations"
+                       else configDir </> "migrations"
 
   putStrLn "Loading configuration..."
   config <- loadConfig configPath
@@ -21,7 +26,7 @@ main = do
   env <- buildEnv config
 
   putStrLn "Running migrations..."
-  runApp env $ runMigrations "migrations"
+  runApp env $ runMigrations migrationsPath
 
   putStrLn "Starting wisp-srv..."
   runApp env startServer
