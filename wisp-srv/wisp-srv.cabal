@@ -77,6 +77,8 @@ test-suite wisp-srv-test
         Infra.Db.MigrationsSpec
         Infra.Db.Entity
         Infra.Db.EntitySpec
+        Infra.Db.Jobs
+        Infra.Db.JobsSpec
     build-tool-depends:
         hspec-discover:hspec-discover
     build-depends:
@@ -85,6 +87,7 @@ test-suite wisp-srv-test
         bytestring,
         aeson,
         yaml,
+        time,
         mtl,
         fast-logger,
         NanoID,
