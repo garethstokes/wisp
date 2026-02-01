@@ -89,6 +89,7 @@ test-suite wisp-srv-test
         App.ConfigSpec
         App.Monad
         App.Env
+        Http.Handlers.Auth
         Http.Handlers.Health
         Http.Handlers.HealthSpec
         Http.Routes
@@ -102,6 +103,7 @@ test-suite wisp-srv-test
         Infra.Db.JobsSpec
         Infra.Google.Auth
         Infra.Google.AuthSpec
+        TestEnv
     build-tool-depends:
         hspec-discover:hspec-discover
     build-depends:
@@ -124,4 +126,6 @@ test-suite wisp-srv-test
         filepath,
         http-client,
         http-client-tls,
-        hspec
+        http-types,
+        hspec,
+        uri-encode
