@@ -37,6 +37,7 @@ result-*
 
 # Nix/direnv
 .direnv/
+.envrc
 
 # OS
 .DS_Store
