@@ -31,6 +31,7 @@ executable wisp-srv
         App.Env
         Domain.Id
         Domain.Schema
+        Http.Handlers.Auth
         Http.Handlers.Health
         Http.Routes
         Http.Server
