@@ -3,10 +3,10 @@ module Http.Routes
   ) where
 
 import Control.Monad.Reader (ReaderT)
-import Web.Scotty.Trans (ScottyT, get)
+import Web.Scotty.Trans (ScottyT, get, post)
 import Http.Handlers.Health (getHealth)
 import Http.Handlers.Auth (getGoogleAuth, getGoogleCallback, getAuthStatus)
-import Http.Handlers.Activities (getActivities, getActivityById)
+import Http.Handlers.Activities (getActivities, getActivityById, triggerPoll)
 import App.Monad (Env)
 
 routes :: ScottyT (ReaderT Env IO) ()
@@ -22,3 +22,6 @@ routes = do
   -- Activities
   get "/activities" getActivities
   get "/activities/:id" getActivityById
+
+  -- Poll trigger
+  post "/poll" triggerPoll

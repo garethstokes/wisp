@@ -2,6 +2,7 @@
 module Http.Handlers.Activities
   ( getActivities
   , getActivityById
+  , triggerPoll
   ) where
 
 import Control.Monad.Reader (ReaderT)
@@ -14,6 +15,7 @@ import App.Monad (Env)
 import Domain.Id (EntityId(..))
 import Domain.Activity (Activity(..), ActivityStatus(..))
 import Infra.Db.Activity (getActivitiesByStatus, getActivity)
+import Services.Scheduler (runPollCycle)
 
 -- Convert Activity to JSON
 activityToJson :: Activity -> Value
@@ -50,3 +52,9 @@ getActivityById = do
       status status404
       json $ object ["error" .= ("Activity not found" :: Text)]
     Just activity -> json $ activityToJson activity
+
+-- POST /poll
+triggerPoll :: ActionT (ReaderT Env IO) ()
+triggerPoll = do
+  lift runPollCycle
+  json $ object ["status" .= ("poll triggered" :: Text)]
