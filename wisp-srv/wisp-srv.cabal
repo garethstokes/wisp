@@ -53,7 +53,7 @@ test-suite wisp-srv-test
     import:           warnings
     type:             exitcode-stdio-1.0
     main-is:          Main.hs
-    hs-source-dirs:   test
+    hs-source-dirs:   test, src
     default-language: GHC2021
     default-extensions:
         OverloadedStrings
@@ -66,5 +66,11 @@ test-suite wisp-srv-test
         QuasiQuotes
     build-depends:
         base >=4.17 && <5,
+        text,
+        bytestring,
+        aeson,
+        NanoID,
+        mwc-random,
+        postgresql-simple,
         hspec,
         hspec-discover

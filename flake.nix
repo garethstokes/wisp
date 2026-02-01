@@ -18,6 +18,7 @@
             ghc
             cabal-install
             haskell-language-server
+            haskellPackages.hspec-discover
 
             # Database
             postgresql
