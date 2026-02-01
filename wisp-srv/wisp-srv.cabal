@@ -44,6 +44,7 @@ executable wisp-srv
         Infra.Db.Migrations
         Infra.Db.PollState
         Infra.Google.Auth
+        Infra.Google.TokenManager
     build-depends:
         base >=4.17 && <5,
         text,
@@ -108,6 +109,8 @@ test-suite wisp-srv-test
         Infra.Db.PollStateSpec
         Infra.Google.Auth
         Infra.Google.AuthSpec
+        Infra.Google.TokenManager
+        Infra.Google.TokenManagerSpec
         TestEnv
     build-tool-depends:
         hspec-discover:hspec-discover
