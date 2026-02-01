@@ -69,6 +69,10 @@ test-suite wisp-srv-test
         Domain.IdSpec
         Domain.Schema
         Domain.SchemaSpec
+        App.Config
+        App.ConfigSpec
+        App.Monad
+        App.Env
     build-tool-depends:
         hspec-discover:hspec-discover
     build-depends:
@@ -76,6 +80,9 @@ test-suite wisp-srv-test
         text,
         bytestring,
         aeson,
+        yaml,
+        mtl,
+        fast-logger,
         NanoID,
         mwc-random,
         postgresql-simple,
