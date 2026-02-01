@@ -73,6 +73,8 @@ test-suite wisp-srv-test
         App.ConfigSpec
         App.Monad
         App.Env
+        Infra.Db.Migrations
+        Infra.Db.MigrationsSpec
     build-tool-depends:
         hspec-discover:hspec-discover
     build-depends:
@@ -86,4 +88,6 @@ test-suite wisp-srv-test
         NanoID,
         mwc-random,
         postgresql-simple,
+        directory,
+        filepath,
         hspec
