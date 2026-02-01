@@ -1,0 +1,70 @@
+cabal-version: 3.0
+name:          wisp-srv
+version:       0.1.0.0
+synopsis:      Wisp personal assistant backend
+license:       BSD-3-Clause
+author:        Gareth
+build-type:    Simple
+
+common warnings
+    ghc-options: -Wall -Wunused-packages
+
+executable wisp-srv
+    import:           warnings
+    main-is:          Main.hs
+    hs-source-dirs:   app, src
+    default-language: GHC2021
+    default-extensions:
+        OverloadedStrings
+        OverloadedRecordDot
+        DuplicateRecordFields
+        DeriveGeneric
+        GeneralizedNewtypeDeriving
+        DerivingStrategies
+        LambdaCase
+        QuasiQuotes
+        RecordWildCards
+        StrictData
+    build-depends:
+        base >=4.17 && <5,
+        text,
+        bytestring,
+        aeson,
+        yaml,
+        time,
+        mtl,
+        transformers,
+        postgresql-simple,
+        async,
+        http-client,
+        http-client-tls,
+        http-types,
+        scotty,
+        wai,
+        warp,
+        fast-logger,
+        neat-interpolation,
+        NanoID,
+        directory,
+        filepath,
+        uri-encode
+
+test-suite wisp-srv-test
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          Main.hs
+    hs-source-dirs:   test
+    default-language: GHC2021
+    default-extensions:
+        OverloadedStrings
+        OverloadedRecordDot
+        DuplicateRecordFields
+        DeriveGeneric
+        GeneralizedNewtypeDeriving
+        DerivingStrategies
+        LambdaCase
+        QuasiQuotes
+    build-depends:
+        base >=4.17 && <5,
+        hspec,
+        hspec-discover
