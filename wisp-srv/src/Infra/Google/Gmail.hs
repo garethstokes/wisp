@@ -13,7 +13,7 @@ module Infra.Google.Gmail
   , listHistory
   ) where
 
-import Data.Aeson (FromJSON(..), (.:), (.:?), withObject)
+import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.:?), withObject, object, (.=))
 import qualified Data.Aeson as Aeson
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -32,6 +32,17 @@ data GmailMessage = GmailMessage
   , gmailRaw :: Maybe Text
   } deriving (Show, Eq)
 
+instance ToJSON GmailMessage where
+  toJSON msg = object
+    [ "id" .= gmailId msg
+    , "threadId" .= gmailThreadId msg
+    , "labelIds" .= gmailLabelIds msg
+    , "snippet" .= gmailSnippet msg
+    , "payload" .= gmailPayload msg
+    , "internalDate" .= gmailInternalDate msg
+    , "raw" .= gmailRaw msg
+    ]
+
 instance FromJSON GmailMessage where
   parseJSON = withObject "GmailMessage" $ \v -> GmailMessage
     <$> v .: "id"
@@ -49,6 +60,13 @@ data GmailPayload = GmailPayload
   , payloadBody :: Maybe GmailBody
   } deriving (Show, Eq)
 
+instance ToJSON GmailPayload where
+  toJSON p = object
+    [ "headers" .= payloadHeaders p
+    , "mimeType" .= payloadMimeType p
+    , "body" .= payloadBody p
+    ]
+
 instance FromJSON GmailPayload where
   parseJSON = withObject "GmailPayload" $ \v -> GmailPayload
     <$> v .:? "headers"
@@ -61,6 +79,12 @@ data GmailHeader = GmailHeader
   , headerValue :: Text
   } deriving (Show, Eq)
 
+instance ToJSON GmailHeader where
+  toJSON h = object
+    [ "name" .= headerName h
+    , "value" .= headerValue h
+    ]
+
 instance FromJSON GmailHeader where
   parseJSON = withObject "GmailHeader" $ \v -> GmailHeader
     <$> v .: "name"
@@ -71,6 +95,12 @@ data GmailBody = GmailBody
   { bodySize :: Int
   , bodyData :: Maybe Text
   } deriving (Show, Eq)
+
+instance ToJSON GmailBody where
+  toJSON b = object
+    [ "size" .= bodySize b
+    , "data" .= bodyData b
+    ]
 
 instance FromJSON GmailBody where
   parseJSON = withObject "GmailBody" $ \v -> GmailBody
