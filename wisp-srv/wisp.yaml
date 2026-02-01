@@ -1,0 +1,21 @@
+# Wisp configuration
+# Values can be overridden by environment variables:
+#   DATABASE_URL, PORT, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+
+server:
+  host: "127.0.0.1"
+  port: 8080
+
+database:
+  url: "postgres://localhost:5432/wisp"
+
+google:
+  # These are overridden by GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET from .env
+  clientId: "set-via-env"
+  clientSecret: "set-via-env"
+
+polling:
+  intervalMinutes: 5
+
+classification:
+  confidenceThreshold: 0.5

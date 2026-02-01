@@ -65,11 +65,17 @@ loadConfig path = do
     Right cfg -> do
       mDbUrl <- lookupEnv "DATABASE_URL"
       mPort <- lookupEnv "PORT"
+      mGoogleClientId <- lookupEnv "GOOGLE_CLIENT_ID"
+      mGoogleClientSecret <- lookupEnv "GOOGLE_CLIENT_SECRET"
       pure cfg
         { database = cfg.database
             { url = maybe cfg.database.url T.pack mDbUrl
             }
         , server = cfg.server
             { port = maybe cfg.server.port read mPort
+            }
+        , google = cfg.google
+            { clientId = maybe cfg.google.clientId T.pack mGoogleClientId
+            , clientSecret = maybe cfg.google.clientSecret T.pack mGoogleClientSecret
             }
         }
