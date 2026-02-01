@@ -17,6 +17,7 @@ import System.Process (callCommand)
 data Command
   = Auth
   | Status
+  | Poll
   | Help
   deriving (Show)
 
@@ -25,6 +26,7 @@ commandParser :: Parser Command
 commandParser = subparser
   ( command "auth" (info (pure Auth) (progDesc "Start OAuth flow"))
   <> command "status" (info (pure Status) (progDesc "Quick status overview"))
+  <> command "poll" (info (pure Poll) (progDesc "Trigger a poll cycle"))
   <> command "help" (info (pure Help) (progDesc "Show help"))
   )
 
@@ -45,6 +47,7 @@ main = do
   case cmd of
     Auth -> runAuth
     Status -> runStatus
+    Poll -> runPoll
     Help -> runHelp
 
 runHelp :: IO ()
@@ -54,9 +57,23 @@ runHelp = do
   TIO.putStrLn "Commands:"
   TIO.putStrLn "  auth    Start OAuth flow with Google"
   TIO.putStrLn "  status  Show server and auth status"
+  TIO.putStrLn "  poll    Trigger a poll cycle"
   TIO.putStrLn "  help    Show this help"
   TIO.putStrLn ""
   TIO.putStrLn "Use --help for more details"
+
+runPoll :: IO ()
+runPoll = do
+  TIO.putStrLn "Triggering poll..."
+  manager <- newManager defaultManagerSettings
+  initialReq <- parseRequest $ baseUrl <> "/poll"
+  let req = initialReq { method = "POST" }
+  response <- httpLbs req manager
+  case decode (responseBody response) of
+    Just (Object obj) -> case KM.lookup "status" obj of
+      Just (String s) -> TIO.putStrLn $ "Result: " <> s
+      _ -> TIO.putStrLn "Poll triggered"
+    _ -> TIO.putStrLn "Poll request sent"
 
 runAuth :: IO ()
 runAuth = do
