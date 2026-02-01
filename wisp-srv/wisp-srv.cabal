@@ -75,6 +75,8 @@ test-suite wisp-srv-test
         App.Env
         Infra.Db.Migrations
         Infra.Db.MigrationsSpec
+        Infra.Db.Entity
+        Infra.Db.EntitySpec
     build-tool-depends:
         hspec-discover:hspec-discover
     build-depends:
