@@ -127,6 +127,7 @@ test-suite wisp-srv-test
         Services.CalendarPollerSpec
         Services.GmailPoller
         Services.GmailPollerSpec
+        Services.Scheduler
         TestEnv
     build-tool-depends:
         hspec-discover:hspec-discover
@@ -149,4 +150,5 @@ test-suite wisp-srv-test
         http-client,
         http-client-tls,
         http-types,
-        hspec
+        hspec,
+        async

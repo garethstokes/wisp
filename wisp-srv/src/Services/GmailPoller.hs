@@ -66,9 +66,8 @@ initialPoll accessToken = do
               updatePollState "gmail" (Just $ refId firstRef)
               pure $ Right count
             Right firstMsg -> do
-              -- Use internalDate as a proxy cursor since we don't have historyId in message
-              -- For proper history tracking, we'd need to call getProfile
-              updatePollState "gmail" (gmailInternalDate firstMsg)
+              -- Use historyId from the message for proper incremental sync
+              updatePollState "gmail" (gmailHistoryId firstMsg)
               pure $ Right count
 
 -- | Incremental poll: use history API to get new messages since last cursor

@@ -13,6 +13,7 @@ module Infra.Google.Gmail
   , listHistory
   ) where
 
+import Control.Exception (try, SomeException)
 import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.:?), withObject, object, (.=))
 import qualified Data.Aeson as Aeson
 import Data.Text (Text)
@@ -20,6 +21,7 @@ import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
 import Network.HTTP.Client
 import Network.HTTP.Client.TLS (tlsManagerSettings)
+import Network.HTTP.Types.Status (statusIsSuccessful, statusCode)
 
 -- | A full Gmail message with all details
 data GmailMessage = GmailMessage
@@ -29,6 +31,7 @@ data GmailMessage = GmailMessage
   , gmailSnippet :: Maybe Text
   , gmailPayload :: Maybe GmailPayload
   , gmailInternalDate :: Maybe Text
+  , gmailHistoryId :: Maybe Text  -- Used for incremental sync
   , gmailRaw :: Maybe Text
   } deriving (Show, Eq)
 
@@ -40,6 +43,7 @@ instance ToJSON GmailMessage where
     , "snippet" .= gmailSnippet msg
     , "payload" .= gmailPayload msg
     , "internalDate" .= gmailInternalDate msg
+    , "historyId" .= gmailHistoryId msg
     , "raw" .= gmailRaw msg
     ]
 
@@ -51,6 +55,7 @@ instance FromJSON GmailMessage where
     <*> v .:? "snippet"
     <*> v .:? "payload"
     <*> v .:? "internalDate"
+    <*> v .:? "historyId"
     <*> v .:? "raw"
 
 -- | Message payload containing headers and body
@@ -177,10 +182,17 @@ listMessages accessToken pageToken = do
   let req = initialReq
         { requestHeaders = [("Authorization", "Bearer " <> encodeUtf8 accessToken)]
         }
-  response <- httpLbs req manager
-  pure $ case Aeson.decode (responseBody response) of
-    Just msgList -> Right msgList
-    Nothing -> Left $ "Failed to parse messages list: " <> T.pack (show $ responseBody response)
+  result <- try $ httpLbs req manager
+  pure $ case result of
+    Left (e :: SomeException) -> Left $ "HTTP error: " <> T.pack (show e)
+    Right response
+      | statusIsSuccessful (responseStatus response) ->
+          case Aeson.decode (responseBody response) of
+            Just msgList -> Right msgList
+            Nothing -> Left $ "Failed to parse messages list: " <> T.pack (show $ responseBody response)
+      | otherwise ->
+          Left $ "Gmail API error " <> T.pack (show $ statusCode $ responseStatus response)
+               <> ": " <> T.pack (show $ responseBody response)
 
 -- | Get a single message by ID
 getMessage :: Text -> Text -> IO (Either Text GmailMessage)
@@ -191,10 +203,17 @@ getMessage accessToken messageId = do
   let req = initialReq
         { requestHeaders = [("Authorization", "Bearer " <> encodeUtf8 accessToken)]
         }
-  response <- httpLbs req manager
-  pure $ case Aeson.decode (responseBody response) of
-    Just msg -> Right msg
-    Nothing -> Left $ "Failed to parse message: " <> T.pack (show $ responseBody response)
+  result <- try $ httpLbs req manager
+  pure $ case result of
+    Left (e :: SomeException) -> Left $ "HTTP error: " <> T.pack (show e)
+    Right response
+      | statusIsSuccessful (responseStatus response) ->
+          case Aeson.decode (responseBody response) of
+            Just msg -> Right msg
+            Nothing -> Left $ "Failed to parse message: " <> T.pack (show $ responseBody response)
+      | otherwise ->
+          Left $ "Gmail API error " <> T.pack (show $ statusCode $ responseStatus response)
+               <> ": " <> T.pack (show $ responseBody response)
 
 -- | List history starting from a given historyId
 listHistory :: Text -> Text -> Maybe Text -> IO (Either Text GmailHistoryList)
@@ -207,7 +226,14 @@ listHistory accessToken startHistoryId pageToken = do
   let req = initialReq
         { requestHeaders = [("Authorization", "Bearer " <> encodeUtf8 accessToken)]
         }
-  response <- httpLbs req manager
-  pure $ case Aeson.decode (responseBody response) of
-    Just histList -> Right histList
-    Nothing -> Left $ "Failed to parse history list: " <> T.pack (show $ responseBody response)
+  result <- try $ httpLbs req manager
+  pure $ case result of
+    Left (e :: SomeException) -> Left $ "HTTP error: " <> T.pack (show e)
+    Right response
+      | statusIsSuccessful (responseStatus response) ->
+          case Aeson.decode (responseBody response) of
+            Just histList -> Right histList
+            Nothing -> Left $ "Failed to parse history list: " <> T.pack (show $ responseBody response)
+      | otherwise ->
+          Left $ "Gmail API error " <> T.pack (show $ statusCode $ responseStatus response)
+               <> ": " <> T.pack (show $ responseBody response)

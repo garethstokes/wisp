@@ -7,12 +7,14 @@ module Infra.Google.Calendar
   , getEvent
   ) where
 
+import Control.Exception (try, SomeException)
 import Data.Aeson (FromJSON(..), ToJSON(..), (.:), (.:?), withObject, object, (.=), Value)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
 import Network.HTTP.Client
 import Network.HTTP.Client.TLS (tlsManagerSettings)
+import Network.HTTP.Types.Status (statusIsSuccessful, statusCode)
 import qualified Data.Aeson as Aeson
 
 -- | A calendar event
@@ -135,10 +137,17 @@ listEvents accessToken syncToken pageToken = do
   let req = initialReq
         { requestHeaders = [("Authorization", "Bearer " <> encodeUtf8 accessToken)]
         }
-  response <- httpLbs req manager
-  pure $ case Aeson.decode (responseBody response) of
-    Just evtList -> Right evtList
-    Nothing -> Left $ "Failed to parse events list: " <> T.pack (show $ responseBody response)
+  result <- try $ httpLbs req manager
+  pure $ case result of
+    Left (e :: SomeException) -> Left $ "HTTP error: " <> T.pack (show e)
+    Right response
+      | statusIsSuccessful (responseStatus response) ->
+          case Aeson.decode (responseBody response) of
+            Just evtList -> Right evtList
+            Nothing -> Left $ "Failed to parse events list: " <> T.pack (show $ responseBody response)
+      | otherwise ->
+          Left $ "Calendar API error " <> T.pack (show $ statusCode $ responseStatus response)
+               <> ": " <> T.pack (show $ responseBody response)
 
 -- | Get a single event by ID
 getEvent :: Text -> Text -> IO (Either Text CalendarEvent)
@@ -149,7 +158,14 @@ getEvent accessToken eventId = do
   let req = initialReq
         { requestHeaders = [("Authorization", "Bearer " <> encodeUtf8 accessToken)]
         }
-  response <- httpLbs req manager
-  pure $ case Aeson.decode (responseBody response) of
-    Just evt -> Right evt
-    Nothing -> Left $ "Failed to parse event: " <> T.pack (show $ responseBody response)
+  result <- try $ httpLbs req manager
+  pure $ case result of
+    Left (e :: SomeException) -> Left $ "HTTP error: " <> T.pack (show e)
+    Right response
+      | statusIsSuccessful (responseStatus response) ->
+          case Aeson.decode (responseBody response) of
+            Just evt -> Right evt
+            Nothing -> Left $ "Failed to parse event: " <> T.pack (show $ responseBody response)
+      | otherwise ->
+          Left $ "Calendar API error " <> T.pack (show $ statusCode $ responseStatus response)
+               <> ": " <> T.pack (show $ responseBody response)

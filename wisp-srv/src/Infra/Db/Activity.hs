@@ -8,7 +8,7 @@ module Infra.Db.Activity
   ) where
 
 import Control.Monad.IO.Class (liftIO)
-import Data.Aeson (ToJSON, Value, toJSON)
+import Data.Aeson ()
 import Data.Text (Text)
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.FromRow
@@ -59,7 +59,7 @@ insertActivity new = do
     ( unEntityId aid
     , srcText
     , newActivitySourceId new
-    , toJSON (newActivityRaw new)
+    , newActivityRaw new
     , newActivityTitle new
     , newActivitySenderEmail new
     , newActivityStartsAt new
