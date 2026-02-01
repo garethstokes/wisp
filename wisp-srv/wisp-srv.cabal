@@ -33,6 +33,7 @@ executable wisp-srv
         Domain.Activity
         Domain.Id
         Domain.Schema
+        Http.Handlers.Activities
         Http.Handlers.Auth
         Http.Handlers.Health
         Http.Routes
@@ -97,6 +98,7 @@ test-suite wisp-srv-test
         App.ConfigSpec
         App.Monad
         App.Env
+        Http.Handlers.Activities
         Http.Handlers.Auth
         Http.Handlers.Health
         Http.Handlers.HealthSpec
