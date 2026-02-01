@@ -3,9 +3,8 @@ module Main where
 
 import Control.Concurrent (threadDelay)
 import Control.Monad (when)
-import Data.Aeson (Value(..))
-import Data.Aeson (decode)
-import Data.Text (Text)
+import Data.Aeson (Value(..), decode)
+import Data.Text (Text, pack)
 import Data.Aeson.Types (Object)
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.Text.IO as TIO
@@ -111,8 +110,8 @@ runStatus = do
   healthReq <- parseRequest $ baseUrl <> "/health"
   healthResp <- httpLbs healthReq manager
   case decode (responseBody healthResp) :: Maybe Value of
-    Just _ -> TIO.putStrLn "Server:  online"
-    Nothing -> TIO.putStrLn "Server:  offline"
+    Just _ -> TIO.putStrLn "Server:     online"
+    Nothing -> TIO.putStrLn "Server:     offline"
 
   -- Check auth status
   authReq <- parseRequest $ baseUrl <> "/auth/status"
@@ -124,9 +123,22 @@ runStatus = do
             _ -> False
       if authed
         then do
-          TIO.putStrLn "Google:  authenticated"
+          TIO.putStrLn "Google:     authenticated"
           case KM.lookup "expires_at" obj of
-            Just (String exp) -> TIO.putStrLn $ "Expires: " <> exp
+            Just (String expiry) -> TIO.putStrLn $ "Expires:    " <> expiry
             _ -> return ()
-        else TIO.putStrLn "Google:  not authenticated"
-    _ -> TIO.putStrLn "Google:  unknown"
+        else TIO.putStrLn "Google:     not authenticated"
+    _ -> TIO.putStrLn "Google:     unknown"
+
+  -- Check activities count
+  activitiesReq <- parseRequest $ baseUrl <> "/activities"
+  activitiesResp <- httpLbs activitiesReq manager
+  case decode (responseBody activitiesResp) of
+    Just (Object obj) -> do
+      case KM.lookup "count" obj of
+        Just (Number n) -> TIO.putStrLn $ "Activities: " <> showT (round n :: Int) <> " pending"
+        _ -> TIO.putStrLn "Activities: unknown"
+    _ -> TIO.putStrLn "Activities: unavailable"
+
+showT :: Show a => a -> Text
+showT = pack . show
