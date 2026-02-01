@@ -64,6 +64,13 @@ test-suite wisp-srv-test
         DerivingStrategies
         LambdaCase
         QuasiQuotes
+    other-modules:
+        Domain.Id
+        Domain.IdSpec
+        Domain.Schema
+        Domain.SchemaSpec
+    build-tool-depends:
+        hspec-discover:hspec-discover
     build-depends:
         base >=4.17 && <5,
         text,
@@ -72,5 +79,4 @@ test-suite wisp-srv-test
         NanoID,
         mwc-random,
         postgresql-simple,
-        hspec,
-        hspec-discover
+        hspec
