@@ -25,6 +25,18 @@ executable wisp-srv
         QuasiQuotes
         RecordWildCards
         StrictData
+    other-modules:
+        App.Config
+        App.Monad
+        App.Env
+        Domain.Id
+        Domain.Schema
+        Http.Handlers.Health
+        Http.Routes
+        Http.Server
+        Infra.Db.Entity
+        Infra.Db.Jobs
+        Infra.Db.Migrations
     build-depends:
         base >=4.17 && <5,
         text,
@@ -45,6 +57,7 @@ executable wisp-srv
         fast-logger,
         neat-interpolation,
         NanoID,
+        mwc-random,
         directory,
         filepath,
         uri-encode
@@ -73,6 +86,10 @@ test-suite wisp-srv-test
         App.ConfigSpec
         App.Monad
         App.Env
+        Http.Handlers.Health
+        Http.Handlers.HealthSpec
+        Http.Routes
+        Http.Server
         Infra.Db.Migrations
         Infra.Db.MigrationsSpec
         Infra.Db.Entity
@@ -89,10 +106,14 @@ test-suite wisp-srv-test
         yaml,
         time,
         mtl,
+        transformers,
         fast-logger,
         NanoID,
         mwc-random,
         postgresql-simple,
+        scotty,
+        wai,
+        warp,
         directory,
         filepath,
         hspec
