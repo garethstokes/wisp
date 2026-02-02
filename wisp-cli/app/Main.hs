@@ -78,43 +78,40 @@ runAuth :: IO ()
 runAuth = do
   manager <- newManager defaultManagerSettings
 
-  -- Check if already authenticated
-  alreadyAuthed <- checkAuthStatus manager
-  when alreadyAuthed $ do
-    TIO.putStrLn "Already authenticated with Google."
-    TIO.putStrLn "Run 'wisp-cli status' for details."
-    return ()
+  -- Show current account count
+  currentCount <- getAccountCount manager
+  when (currentCount > 0) $ do
+    TIO.putStrLn $ "Currently have " <> showT currentCount <> " account(s) connected."
+    TIO.putStrLn "Adding another account..."
 
-  if alreadyAuthed
-    then return ()
-    else do
-      TIO.putStrLn "Starting OAuth flow..."
-      TIO.putStrLn "Opening browser for Google authentication..."
-      let authUrl = baseUrl <> "/auth/google"
-      -- Open browser (cross-platform)
-      callCommand $ "xdg-open '" <> authUrl <> "' 2>/dev/null || open '" <> authUrl <> "' 2>/dev/null || start '' '" <> authUrl <> "'"
-      TIO.putStrLn "\nWaiting for authentication..."
-      pollForAuth manager 60  -- Wait up to 60 seconds
+  TIO.putStrLn "Starting OAuth flow..."
+  TIO.putStrLn "Opening browser for Google authentication..."
+  let authUrl = baseUrl <> "/auth/google"
+  -- Open browser (cross-platform)
+  callCommand $ "xdg-open '" <> authUrl <> "' 2>/dev/null || open '" <> authUrl <> "' 2>/dev/null || start '' '" <> authUrl <> "'"
+  TIO.putStrLn "\nWaiting for authentication..."
+  waitForNewAccount manager currentCount 60
 
-checkAuthStatus :: Manager -> IO Bool
-checkAuthStatus manager = do
+getAccountCount :: Manager -> IO Int
+getAccountCount manager = do
   req <- parseRequest $ baseUrl <> "/auth/status"
   response <- httpLbs req manager
   case decode (responseBody response) of
     Just (Object obj) -> case KM.lookup "count" obj of
-      Just (Number n) -> return (n > 0)
-      _ -> return False
-    _ -> return False
+      Just (Number n) -> return (round n)
+      _ -> return 0
+    _ -> return 0
 
-pollForAuth :: Manager -> Int -> IO ()
-pollForAuth _ 0 = TIO.putStrLn "Timed out waiting for authentication."
-pollForAuth manager remaining = do
-  authed <- checkAuthStatus manager
-  if authed
-    then TIO.putStrLn "Authentication successful!"
+-- Wait for account count to increase (new account added)
+waitForNewAccount :: Manager -> Int -> Int -> IO ()
+waitForNewAccount _ _ 0 = TIO.putStrLn "Timed out waiting for authentication."
+waitForNewAccount manager oldCount remaining = do
+  newCount <- getAccountCount manager
+  if newCount > oldCount
+    then TIO.putStrLn "Authentication successful! New account added."
     else do
       threadDelay 1000000  -- 1 second
-      pollForAuth manager (remaining - 1)
+      waitForNewAccount manager oldCount (remaining - 1)
 
 runStatus :: IO ()
 runStatus = do
