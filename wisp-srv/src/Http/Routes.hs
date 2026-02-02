@@ -7,6 +7,7 @@ import Web.Scotty.Trans (ScottyT, get, post)
 import Http.Handlers.Health (getHealth)
 import Http.Handlers.Auth (getGoogleAuth, getGoogleCallback, getAuthStatus)
 import Http.Handlers.Activities (getActivities, getActivityById, getActivityLogs, getToday, approveActivity, dismissActivity, triggerPoll)
+import Http.Handlers.Chat (postChat)
 import Http.Handlers.People (getPeople, getPersonById)
 import Http.Handlers.Pipeline (postRunPipeline, postClassifyActivity)
 import App.Monad (Env)
@@ -37,6 +38,9 @@ routes = do
   -- People
   get "/people" getPeople
   get "/people/:id" getPersonById
+
+  -- Chat
+  post "/chat" postChat
 
   -- Classification pipeline
   post "/pipeline/run" postRunPipeline
