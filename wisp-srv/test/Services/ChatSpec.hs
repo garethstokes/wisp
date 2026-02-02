@@ -8,30 +8,29 @@ import Services.Chat (buildSystemPrompt)
 spec :: Spec
 spec = describe "Chat" $ do
   describe "buildSystemPrompt" $ do
-    it "includes Wisp identity and rules" $ do
-      let ctx = ChatContext
-            { contextCalendarEvents = []
-            , contextRecentActivities = []
-            , contextPendingEmails = []
-            , contextQuarantineCount = 0
-            , contextSurfacedCount = 0
-            , contextMentionedPeople = []
-            }
+    it "includes Wisp identity and action format" $ do
+      let ctx = emptyContext
       let prompt = buildSystemPrompt ctx
       prompt `shouldSatisfy` T.isInfixOf "Wisp"
       prompt `shouldSatisfy` T.isInfixOf "Never say"
       prompt `shouldSatisfy` T.isInfixOf "No events scheduled today"
-      prompt `shouldSatisfy` T.isInfixOf "No pending emails"
+      prompt `shouldSatisfy` T.isInfixOf "action"
+      prompt `shouldSatisfy` T.isInfixOf "mark_complete"
 
     it "includes context counts" $ do
-      let ctx = ChatContext
-            { contextCalendarEvents = []
-            , contextRecentActivities = []
-            , contextPendingEmails = []
-            , contextQuarantineCount = 5
-            , contextSurfacedCount = 3
-            , contextMentionedPeople = []
-            }
+      let ctx = emptyContext
       let prompt = buildSystemPrompt ctx
-      prompt `shouldSatisfy` T.isInfixOf "5 items in quarantine"
-      prompt `shouldSatisfy` T.isInfixOf "3 items surfaced"
+      -- Now shows counts in headers like "Surfaced (0 items needing attention)"
+      prompt `shouldSatisfy` T.isInfixOf "Surfaced (0 items"
+      prompt `shouldSatisfy` T.isInfixOf "Quarantined (0 items"
+
+emptyContext :: ChatContext
+emptyContext = ChatContext
+  { contextCalendarEvents = []
+  , contextRecentActivities = []
+  , contextPendingEmails = []
+  , contextQuarantined = []
+  , contextSurfaced = []
+  , contextNeedsReview = []
+  , contextMentionedPeople = []
+  }

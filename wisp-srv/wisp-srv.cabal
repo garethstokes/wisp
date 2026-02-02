@@ -33,6 +33,7 @@ executable wisp-srv
         Domain.Account
         Domain.Activity
         Domain.Chat
+        Domain.ChatAction
         Domain.Classification
         Domain.Id
         Domain.Person
