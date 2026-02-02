@@ -433,14 +433,25 @@ runStatus = do
         _ -> TIO.putStrLn "Accounts:   none connected"
     _ -> TIO.putStrLn "Accounts:   unknown"
 
-  -- Check activities count
-  activitiesReq <- parseRequest $ baseUrl <> "/activities"
-  activitiesResp <- httpLbs activitiesReq manager
-  case decode (responseBody activitiesResp) of
+  -- Check activities stats
+  statsReq <- parseRequest $ baseUrl <> "/activities/stats"
+  statsResp <- httpLbs statsReq manager
+  case decode (responseBody statsResp) of
     Just (Object obj) -> do
-      case KM.lookup "count" obj of
-        Just (Number n) -> TIO.putStrLn $ "Activities: " <> showT (round n :: Int) <> " pending"
-        _ -> TIO.putStrLn "Activities: unknown"
+      TIO.putStrLn "Activities:"
+      let getCount key = case KM.lookup key obj of
+            Just (Number n) -> round n :: Int
+            _ -> 0
+      let pending = getCount "pending"
+      let needsReview = getCount "needs_review"
+      let quarantined = getCount "quarantined"
+      let surfaced = getCount "surfaced"
+      when (pending > 0) $ TIO.putStrLn $ "            " <> showT pending <> " pending"
+      when (needsReview > 0) $ TIO.putStrLn $ "            " <> showT needsReview <> " needs review"
+      when (quarantined > 0) $ TIO.putStrLn $ "            " <> showT quarantined <> " quarantined"
+      when (surfaced > 0) $ TIO.putStrLn $ "            " <> showT surfaced <> " surfaced"
+      when (pending == 0 && needsReview == 0 && quarantined == 0 && surfaced == 0) $
+        TIO.putStrLn "            all clear"
     _ -> TIO.putStrLn "Activities: unavailable"
 
 showT :: Show a => a -> Text

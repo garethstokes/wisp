@@ -1,6 +1,7 @@
 -- src/Http/Handlers/Activities.hs
 module Http.Handlers.Activities
   ( getActivities
+  , getActivityStats
   , getActivityById
   , getActivityLogs
   , getToday
@@ -54,6 +55,22 @@ getActivities = do
   json $ object
     [ "activities" .= map activityToJson activities
     , "count" .= totalCount
+    ]
+
+-- GET /activities/stats - Get counts by status
+getActivityStats :: ActionT (ReaderT Env IO) ()
+getActivityStats = do
+  pending <- lift $ countActivitiesByStatus Pending
+  needsReview <- lift $ countActivitiesByStatus NeedsReview
+  quarantined <- lift $ countActivitiesByStatus Quarantined
+  surfaced <- lift $ countActivitiesByStatus Surfaced
+  processed <- lift $ countActivitiesByStatus Processed
+  json $ object
+    [ "pending" .= pending
+    , "needs_review" .= needsReview
+    , "quarantined" .= quarantined
+    , "surfaced" .= surfaced
+    , "processed" .= processed
     ]
 
 -- GET /activities/:id

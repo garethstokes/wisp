@@ -6,7 +6,7 @@ import Control.Monad.Reader (ReaderT)
 import Web.Scotty.Trans (ScottyT, get, post)
 import Http.Handlers.Health (getHealth)
 import Http.Handlers.Auth (getGoogleAuth, getGoogleCallback, getAuthStatus)
-import Http.Handlers.Activities (getActivities, getActivityById, getActivityLogs, getToday, approveActivity, dismissActivity, triggerPoll)
+import Http.Handlers.Activities (getActivities, getActivityStats, getActivityById, getActivityLogs, getToday, approveActivity, dismissActivity, triggerPoll)
 import Http.Handlers.Chat (postChat)
 import Http.Handlers.People (getPeople, getPersonById)
 import Http.Handlers.Pipeline (postRunPipeline, postClassifyActivity)
@@ -24,6 +24,7 @@ routes = do
 
   -- Activities
   get "/activities" getActivities
+  get "/activities/stats" getActivityStats
   get "/activities/:id" getActivityById
   get "/activities/:id/logs" getActivityLogs
   get "/today" getToday
