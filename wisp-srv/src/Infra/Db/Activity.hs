@@ -6,6 +6,7 @@ module Infra.Db.Activity
   , activityExistsForAccount
   , getActivity
   , getActivitiesByStatus
+  , countActivitiesByStatus
   , getActivitiesForToday
   , getRecentActivities
   , getTodaysCalendarEvents
@@ -201,6 +202,23 @@ getActivitiesByStatus status limit = do
     \from activities where status = ? \
     \order by created_at desc limit ?"
     (statusText, limit)
+
+-- Count activities by status (no limit)
+countActivitiesByStatus :: ActivityStatus -> App Int
+countActivitiesByStatus status = do
+  conn <- getConn
+  let statusText = case status of
+        Pending -> "pending" :: Text
+        Quarantined -> "quarantined"
+        Processed -> "processed"
+        Surfaced -> "surfaced"
+        Archived -> "archived"
+  results <- liftIO $ query conn
+    "select count(*) from activities where status = ?"
+    (Only statusText)
+  pure $ case results of
+    [Only n] -> n
+    _ -> 0
 
 -- Update activity status
 updateActivityStatus :: EntityId -> ActivityStatus -> App ()

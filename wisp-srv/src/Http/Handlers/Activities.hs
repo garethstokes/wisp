@@ -18,7 +18,7 @@ import Web.Scotty.Trans (ActionT, json, status, pathParam)
 import App.Monad (Env)
 import Domain.Id (EntityId(..))
 import Domain.Activity (Activity(..), ActivityStatus(..))
-import Infra.Db.Activity (getActivitiesByStatus, getActivity, getActivitiesForToday, updateActivityStatus)
+import Infra.Db.Activity (getActivitiesByStatus, countActivitiesByStatus, getActivity, getActivitiesForToday, updateActivityStatus)
 import Infra.Db.Receipt (getReceiptsForActivity)
 import Services.Scheduler (runPollCycle)
 
@@ -47,11 +47,13 @@ activityToJson a = object
 -- GET /activities
 getActivities :: ActionT (ReaderT Env IO) ()
 getActivities = do
-  -- Get recent pending activities
+  -- Get recent pending activities (limited for response size)
   activities <- lift $ getActivitiesByStatus Pending 50
+  -- Get true total count
+  totalCount <- lift $ countActivitiesByStatus Pending
   json $ object
     [ "activities" .= map activityToJson activities
-    , "count" .= length activities
+    , "count" .= totalCount
     ]
 
 -- GET /activities/:id
