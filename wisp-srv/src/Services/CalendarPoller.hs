@@ -1,6 +1,7 @@
--- src/Services/CalendarPoller.hs
 module Services.CalendarPoller
   ( pollCalendar
+  , pollCalendarForAccount
+  , pollAllCalendar
   , parseEventTime
   ) where
 
@@ -11,12 +12,14 @@ import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (UTCTime)
-import Data.Time.Format (parseTimeM, defaultTimeLocale)
+import Data.Time.Format.ISO8601 (iso8601ParseM)
 
 import App.Monad (App)
+import Domain.Id (EntityId)
+import Domain.Account (Account(..))
 import Domain.Activity (NewActivity(..), ActivitySource(..))
-import Infra.Db.Activity (insertActivity)
-import Infra.Db.PollState (getPollState, updatePollState, PollState(..))
+import Infra.Db.Activity (insertActivity, activityExistsForAccount)
+import Infra.Db.PollState (getPollStateForAccount, updatePollStateForAccount, ensurePollStateExists, PollState(..))
 import Infra.Google.Calendar
   ( CalendarEvent(..)
   , CalendarEventList(..)
@@ -24,98 +27,90 @@ import Infra.Google.Calendar
   , CalendarPerson(..)
   , listEvents
   )
-import Infra.Google.TokenManager (getValidToken, TokenError(..))
+import Infra.Google.TokenManager (getValidTokenForAccount, getAllValidTokens, TokenError(..))
 
--- | Poll calendar for events and import them as activities.
--- Returns the count of successfully imported events.
-pollCalendar :: App (Either Text Int)
-pollCalendar = do
-  tokenResult <- getValidToken
+-- | Poll Calendar for ALL accounts
+pollAllCalendar :: App [(Text, Either Text Int)]
+pollAllCalendar = do
+  tokensWithAccounts <- getAllValidTokens
+  forM tokensWithAccounts $ \(acc, tokenResult) -> do
+    result <- case tokenResult of
+      Left NoToken -> pure $ Left "No token"
+      Left (RefreshFailed err) -> pure $ Left $ "Token refresh failed: " <> err
+      Right token -> pollCalendarWithToken (accountId acc) token
+    pure (accountEmail acc, result)
+
+-- | Poll Calendar for a specific account
+pollCalendarForAccount :: Account -> App (Either Text Int)
+pollCalendarForAccount acc = do
+  tokenResult <- getValidTokenForAccount (accountId acc)
   case tokenResult of
     Left NoToken -> pure $ Left "No Google token available"
     Left (RefreshFailed err) -> pure $ Left $ "Token refresh failed: " <> err
-    Right accessToken -> do
-      mPollState <- getPollState "calendar"
-      let syncToken = mPollState >>= pollCursor
-      pollWithToken accessToken syncToken
+    Right accessToken -> pollCalendarWithToken (accountId acc) accessToken
 
--- | Poll with a sync token, handling 410 errors by retrying without token
-pollWithToken :: Text -> Maybe Text -> App (Either Text Int)
-pollWithToken accessToken syncToken = do
-  result <- liftIO $ listEvents accessToken syncToken Nothing
+-- | Poll Calendar with a specific token for an account
+pollCalendarWithToken :: EntityId -> Text -> App (Either Text Int)
+pollCalendarWithToken accId accessToken = do
+  ensurePollStateExists accId "calendar"
+  mPollState <- getPollStateForAccount accId "calendar"
+  let mSyncToken = mPollState >>= pollCursor
+
+  result <- liftIO $ listEvents accessToken mSyncToken Nothing
   case result of
     Left err ->
-      -- Handle 410 Gone error (sync token invalidated)
       if "410" `T.isInfixOf` err || "Sync token" `T.isInfixOf` err
-        then case syncToken of
-          Just _ -> pollWithToken accessToken Nothing  -- Retry without sync token
-          Nothing -> pure $ Left err  -- Already tried without token
+        then do
+          updatePollStateForAccount accId "calendar" Nothing
+          pollCalendarWithToken accId accessToken
         else pure $ Left err
-    Right evtList -> do
-      count <- processEventList accessToken evtList
-      -- Update poll state with new sync token
-      updatePollState "calendar" (nextSyncToken evtList)
+    Right eventList -> do
+      let evts = fromMaybe [] (events eventList)
+      count <- processEvents accId evts
+      case nextSyncToken eventList of
+        Just newToken -> updatePollStateForAccount accId "calendar" (Just newToken)
+        Nothing -> pure ()
       pure $ Right count
 
--- | Process an event list, handling pagination
-processEventList :: Text -> CalendarEventList -> App Int
-processEventList accessToken evtList = do
-  let evts = fromMaybe [] (events evtList)
-  count <- processEvents evts
-  -- Handle pagination
-  case nextPageToken evtList of
-    Nothing -> pure count
-    Just pt -> do
-      nextResult <- liftIO $ listEvents accessToken Nothing (Just pt)
-      case nextResult of
-        Left _ -> pure count
-        Right nextEvtList -> do
-          nextCount <- processEventList accessToken nextEvtList
-          pure $ count + nextCount
-
--- | Process a list of calendar events, inserting them as activities
-processEvents :: [CalendarEvent] -> App Int
-processEvents evts = do
+-- | Process a list of calendar events
+processEvents :: EntityId -> [CalendarEvent] -> App Int
+processEvents accId evts = do
   results <- forM evts $ \evt -> do
-    -- Skip cancelled events
     case eventStatus evt of
       Just "cancelled" -> pure 0
       _ -> do
-        let startTime = eventStart evt >>= parseEventTime
-            endTime = eventEnd evt >>= parseEventTime
-            organizerEmail = eventOrganizer evt >>= personEmail
-            newActivity = NewActivity
-              { newActivitySource = Calendar
-              , newActivitySourceId = eventId evt
-              , newActivityRaw = toJSON evt
-              , newActivityTitle = eventSummary evt
-              , newActivitySenderEmail = organizerEmail
-              , newActivityStartsAt = startTime
-              , newActivityEndsAt = endTime
-              }
-        result <- insertActivity newActivity
-        pure $ case result of
-          Just _ -> 1
-          Nothing -> 0  -- Duplicate, already exists
+        exists <- activityExistsForAccount accId Calendar (eventId evt)
+        if exists
+          then pure 0
+          else do
+            let startTime = eventStart evt >>= parseEventTime
+            let endTime = eventEnd evt >>= parseEventTime
+            let newActivity = NewActivity
+                  { newActivityAccountId = accId
+                  , newActivitySource = Calendar
+                  , newActivitySourceId = eventId evt
+                  , newActivityRaw = fromMaybe (toJSON evt) (eventRaw evt)
+                  , newActivityTitle = eventSummary evt
+                  , newActivitySenderEmail = eventOrganizer evt >>= personEmail
+                  , newActivityStartsAt = startTime
+                  , newActivityEndsAt = endTime
+                  }
+            result <- insertActivity newActivity
+            pure $ case result of
+              Just _ -> 1
+              Nothing -> 0
   pure $ sum results
 
--- | Parse a CalendarDateTime to UTCTime.
--- Returns Nothing for all-day events (date-only).
+-- | Parse event time from CalendarDateTime
 parseEventTime :: CalendarDateTime -> Maybe UTCTime
-parseEventTime dt =
-  case dateTimeValue dt of
-    Just dtStr -> parseISO8601 dtStr
-    Nothing -> Nothing  -- All-day events have only dateValue
+parseEventTime dt = case dateTimeValue dt of
+  Just dtStr -> iso8601ParseM (T.unpack dtStr)
+  Nothing -> Nothing
 
--- | Parse ISO8601 datetime string to UTCTime
--- Handles formats like "2026-02-01T10:00:00Z" and "2026-02-01T10:00:00+00:00"
-parseISO8601 :: Text -> Maybe UTCTime
-parseISO8601 txt =
-  let str = T.unpack txt
-  in  parseTimeM True defaultTimeLocale "%Y-%m-%dT%H:%M:%SZ" str
-      <|> parseTimeM True defaultTimeLocale "%Y-%m-%dT%H:%M:%S%z" str
-      <|> parseTimeM True defaultTimeLocale "%Y-%m-%dT%H:%M:%S%Z" str
-  where
-    (<|>) :: Maybe a -> Maybe a -> Maybe a
-    (<|>) Nothing b = b
-    (<|>) a _ = a
+-- Legacy: poll all accounts
+pollCalendar :: App (Either Text Int)
+pollCalendar = do
+  results <- pollAllCalendar
+  case results of
+    [] -> pure $ Left "No accounts configured"
+    _ -> pure $ Right $ sum [n | (_, Right n) <- results]
