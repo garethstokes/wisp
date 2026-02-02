@@ -32,6 +32,7 @@ executable wisp-srv
         App.Env
         Domain.Account
         Domain.Activity
+        Domain.Classification
         Domain.Id
         Domain.Person
         Domain.Schema
@@ -97,6 +98,8 @@ test-suite wisp-srv-test
         Domain.AccountSpec
         Domain.Activity
         Domain.ActivitySpec
+        Domain.Classification
+        Domain.ClassificationSpec
         Domain.Id
         Domain.IdSpec
         Domain.Person
