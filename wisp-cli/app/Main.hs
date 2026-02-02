@@ -5,7 +5,7 @@ import Control.Concurrent (threadDelay)
 import Control.Monad (when)
 import Data.Aeson (Value(..), decode)
 import Data.Foldable (toList)
-import Data.Text (Text, pack)
+import Data.Text (Text, pack, unpack)
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.Text.IO as TIO
 import Network.HTTP.Client
@@ -19,6 +19,8 @@ data Command
   | Poll
   | Classify
   | Today
+  | Approve Text
+  | Dismiss Text
   | Help
   deriving (Show)
 
@@ -30,8 +32,16 @@ commandParser = subparser
   <> command "poll" (info (pure Poll) (progDesc "Trigger a poll cycle"))
   <> command "classify" (info (pure Classify) (progDesc "Run classification pipeline"))
   <> command "today" (info (pure Today) (progDesc "Show activities requiring attention"))
+  <> command "approve" (info approveParser (progDesc "Approve a quarantined activity"))
+  <> command "dismiss" (info dismissParser (progDesc "Dismiss/archive an activity"))
   <> command "help" (info (pure Help) (progDesc "Show help"))
   )
+
+approveParser :: Parser Command
+approveParser = Approve <$> strArgument (metavar "ID" <> help "Activity ID to approve")
+
+dismissParser :: Parser Command
+dismissParser = Dismiss <$> strArgument (metavar "ID" <> help "Activity ID to dismiss")
 
 opts :: ParserInfo Command
 opts = info (commandParser <**> helper)
@@ -53,6 +63,8 @@ main = do
     Poll -> runPoll
     Classify -> runClassify
     Today -> runToday
+    Approve aid -> runApprove aid
+    Dismiss aid -> runDismiss aid
     Help -> runHelp
 
 runHelp :: IO ()
@@ -60,12 +72,14 @@ runHelp = do
   TIO.putStrLn "wisp - your autonomy-preserving assistant"
   TIO.putStrLn ""
   TIO.putStrLn "Commands:"
-  TIO.putStrLn "  auth      Start OAuth flow with Google"
-  TIO.putStrLn "  status    Show server and auth status"
-  TIO.putStrLn "  poll      Trigger a poll cycle"
-  TIO.putStrLn "  classify  Run classification pipeline"
-  TIO.putStrLn "  today     Show activities requiring attention"
-  TIO.putStrLn "  help      Show this help"
+  TIO.putStrLn "  auth         Start OAuth flow with Google"
+  TIO.putStrLn "  status       Show server and auth status"
+  TIO.putStrLn "  poll         Trigger a poll cycle"
+  TIO.putStrLn "  classify     Run classification pipeline"
+  TIO.putStrLn "  today        Show activities requiring attention"
+  TIO.putStrLn "  approve ID   Approve a quarantined activity"
+  TIO.putStrLn "  dismiss ID   Dismiss/archive an activity"
+  TIO.putStrLn "  help         Show this help"
   TIO.putStrLn ""
   TIO.putStrLn "Use --help for more details"
 
@@ -123,6 +137,34 @@ showActivityBrief prefix (Object act) = do
         _ -> "📝"
   TIO.putStrLn $ prefix <> getSource <> " " <> getUrgency <> " [" <> getId <> "] " <> getTitle
 showActivityBrief _ _ = return ()
+
+runApprove :: Text -> IO ()
+runApprove aid = do
+  manager <- newManager defaultManagerSettings
+  initialReq <- parseRequest $ baseUrl <> "/activities/" <> unpack aid <> "/approve"
+  let req = initialReq { method = "POST" }
+  response <- httpLbs req manager
+  case decode (responseBody response) of
+    Just (Object obj) -> case KM.lookup "status" obj of
+      Just (String "approved") -> TIO.putStrLn $ "✅ Activity " <> aid <> " approved (moved to surfaced)"
+      _ -> case KM.lookup "error" obj of
+        Just (String err) -> TIO.putStrLn $ "❌ Error: " <> err
+        _ -> TIO.putStrLn "Approve request sent"
+    _ -> TIO.putStrLn "❌ Failed to approve activity"
+
+runDismiss :: Text -> IO ()
+runDismiss aid = do
+  manager <- newManager defaultManagerSettings
+  initialReq <- parseRequest $ baseUrl <> "/activities/" <> unpack aid <> "/dismiss"
+  let req = initialReq { method = "POST" }
+  response <- httpLbs req manager
+  case decode (responseBody response) of
+    Just (Object obj) -> case KM.lookup "status" obj of
+      Just (String "dismissed") -> TIO.putStrLn $ "🗑️  Activity " <> aid <> " dismissed (archived)"
+      _ -> case KM.lookup "error" obj of
+        Just (String err) -> TIO.putStrLn $ "❌ Error: " <> err
+        _ -> TIO.putStrLn "Dismiss request sent"
+    _ -> TIO.putStrLn "❌ Failed to dismiss activity"
 
 runClassify :: IO ()
 runClassify = do
