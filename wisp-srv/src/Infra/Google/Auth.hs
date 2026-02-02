@@ -78,7 +78,7 @@ buildAuthUrl cfg = T.concat
   , "&prompt=consent"
   ]
   where
-    scopes = "https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.readonly"
+    scopes = "email https://www.googleapis.com/auth/gmail.readonly https://www.googleapis.com/auth/calendar.readonly"
 
 -- Exchange authorization code for tokens
 exchangeCode :: OAuthConfig -> Text -> IO (Either Text TokenResponse)
