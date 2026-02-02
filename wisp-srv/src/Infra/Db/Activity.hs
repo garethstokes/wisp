@@ -27,8 +27,11 @@ import Domain.Activity
 import Domain.Classification (Classification(..), ActivityType(..), Urgency(..))
 import App.Monad (App, getConn)
 
-instance FromRow Activity where
-  fromRow = Activity
+-- Newtype wrapper to define FromRow instance without orphan warning
+newtype DbActivity = DbActivity { unDbActivity :: Activity }
+
+instance FromRow DbActivity where
+  fromRow = fmap DbActivity $ Activity
     <$> (EntityId <$> field)          -- id
     <*> (EntityId <$> field)          -- account_id
     <*> (parseSource <$> field)       -- source
@@ -113,14 +116,14 @@ getActivity aid = do
     \from activities where id = ?"
     (Only $ unEntityId aid)
   pure $ case results of
-    [a] -> Just a
+    [a] -> Just (unDbActivity a)
     _ -> Nothing
 
 -- Get activities for "today" view: surfaced, high-urgency pending, and quarantined
 getActivitiesForToday :: Int -> App [Activity]
 getActivitiesForToday limit = do
   conn <- getConn
-  liftIO $ query conn
+  results <- liftIO $ query conn
     "select id, account_id, source, source_id, raw, status, title, summary, \
     \sender_email, starts_at, ends_at, created_at, \
     \personas, activity_type, urgency, autonomy_tier, confidence, person_id \
@@ -142,12 +145,13 @@ getActivitiesForToday limit = do
     \  created_at desc \
     \limit ?"
     (Only limit)
+  pure $ map unDbActivity results
 
 -- Get activities from the last N hours
 getRecentActivities :: Int -> App [Activity]
 getRecentActivities hours = do
   conn <- getConn
-  liftIO $ query conn
+  results <- liftIO $ query conn
     "select id, account_id, source, source_id, raw, status, title, summary, \
     \sender_email, starts_at, ends_at, created_at, \
     \personas, activity_type, urgency, autonomy_tier, confidence, person_id \
@@ -156,12 +160,13 @@ getRecentActivities hours = do
     \order by created_at desc \
     \limit 50"
     (Only hours)
+  pure $ map unDbActivity results
 
 -- Get today's calendar events
 getTodaysCalendarEvents :: App [Activity]
 getTodaysCalendarEvents = do
   conn <- getConn
-  liftIO $ query conn
+  results <- liftIO $ query conn
     "select id, account_id, source, source_id, raw, status, title, summary, \
     \sender_email, starts_at, ends_at, created_at, \
     \personas, activity_type, urgency, autonomy_tier, confidence, person_id \
@@ -171,12 +176,13 @@ getTodaysCalendarEvents = do
     \  and starts_at < date_trunc('day', now()) + interval '1 day' \
     \order by starts_at"
     ()
+  pure $ map unDbActivity results
 
 -- Get pending emails (for chat context)
 getPendingEmails :: Int -> App [Activity]
 getPendingEmails limit = do
   conn <- getConn
-  liftIO $ query conn
+  results <- liftIO $ query conn
     "select id, account_id, source, source_id, raw, status, title, summary, \
     \sender_email, starts_at, ends_at, created_at, \
     \personas, activity_type, urgency, autonomy_tier, confidence, person_id \
@@ -185,25 +191,27 @@ getPendingEmails limit = do
     \order by created_at desc \
     \limit ?"
     (Only limit)
+  pure $ map unDbActivity results
 
 -- Get activities by status
 getActivitiesByStatus :: ActivityStatus -> Int -> App [Activity]
-getActivitiesByStatus status limit = do
+getActivitiesByStatus st limit = do
   conn <- getConn
-  let statusText = case status of
+  let statusText = case st of
         Pending -> "pending" :: Text
         NeedsReview -> "needs_review"
         Quarantined -> "quarantined"
         Processed -> "processed"
         Surfaced -> "surfaced"
         Archived -> "archived"
-  liftIO $ query conn
+  results <- liftIO $ query conn
     "select id, account_id, source, source_id, raw, status, title, summary, \
     \sender_email, starts_at, ends_at, created_at, \
     \personas, activity_type, urgency, autonomy_tier, confidence, person_id \
     \from activities where status = ? \
     \order by created_at desc limit ?"
     (statusText, limit)
+  pure $ map unDbActivity results
 
 -- Count activities by status (no limit)
 countActivitiesByStatus :: ActivityStatus -> App Int
