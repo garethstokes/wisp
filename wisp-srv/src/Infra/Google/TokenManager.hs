@@ -1,15 +1,21 @@
 -- src/Infra/Google/TokenManager.hs
 module Infra.Google.TokenManager
   ( getValidToken
+  , getValidTokenForAccount
+  , getAllValidTokens
   , TokenError(..)
   ) where
 
+import Control.Monad (forM)
 import Control.Monad.IO.Class (liftIO)
 import Data.Text (Text)
 import Data.Time (addUTCTime, getCurrentTime)
 import App.Monad (App, getConfig)
 import App.Config (Config(..), GoogleConfig(..))
-import Infra.Db.Auth (AuthToken(..), getToken, updateToken, tokenNeedsRefresh)
+import Domain.Id (EntityId)
+import Domain.Account (Account(..))
+import Infra.Db.Auth (AuthToken(..), getTokenForAccount, getAllTokens, updateTokenForAccount, tokenNeedsRefresh)
+import Infra.Db.Account (getAllAccounts)
 import Infra.Google.Auth (OAuthConfig(..), refreshAccessToken, TokenResponse(..))
 
 data TokenError
@@ -25,21 +31,41 @@ mkOAuthConfig cfg = OAuthConfig
   , oauthRedirectUri = "http://127.0.0.1:8080/auth/google/callback"
   }
 
--- Get a valid access token, refreshing if needed
-getValidToken :: App (Either TokenError Text)
-getValidToken = do
-  mtoken <- getToken "google"
+-- Get a valid access token for a specific account
+getValidTokenForAccount :: EntityId -> App (Either TokenError Text)
+getValidTokenForAccount accountId = do
+  mtoken <- getTokenForAccount accountId "google"
   case mtoken of
     Nothing -> pure $ Left NoToken
     Just tok -> do
       needsRefresh <- liftIO $ tokenNeedsRefresh tok
       if needsRefresh
-        then refreshAndUpdate tok
+        then refreshAndUpdateForAccount accountId tok
         else pure $ Right (tokenAccessToken tok)
 
--- Refresh the token and update in database
-refreshAndUpdate :: AuthToken -> App (Either TokenError Text)
-refreshAndUpdate tok = do
+-- Get valid tokens for ALL accounts (for polling)
+getAllValidTokens :: App [(Account, Either TokenError Text)]
+getAllValidTokens = do
+  accounts <- getAllAccounts
+  forM accounts $ \acc -> do
+    tokenResult <- getValidTokenForAccount (accountId acc)
+    pure (acc, tokenResult)
+
+-- Legacy: get any valid token (first account found)
+getValidToken :: App (Either TokenError Text)
+getValidToken = do
+  tokens <- getAllTokens "google"
+  case tokens of
+    [] -> pure $ Left NoToken
+    (tok:_) -> do
+      needsRefresh <- liftIO $ tokenNeedsRefresh tok
+      if needsRefresh
+        then refreshAndUpdateForAccount (tokenAccountId tok) tok
+        else pure $ Right (tokenAccessToken tok)
+
+-- Refresh the token and update in database for a specific account
+refreshAndUpdateForAccount :: EntityId -> AuthToken -> App (Either TokenError Text)
+refreshAndUpdateForAccount accountId tok = do
   cfg <- getConfig
   let oauthCfg = mkOAuthConfig cfg
   result <- liftIO $ refreshAccessToken oauthCfg (tokenRefreshToken tok)
@@ -48,5 +74,5 @@ refreshAndUpdate tok = do
     Right newTok -> do
       now <- liftIO getCurrentTime
       let newExpiry = addUTCTime (fromIntegral $ expiresIn newTok) now
-      updateToken "google" (accessToken newTok) newExpiry
+      updateTokenForAccount accountId "google" (accessToken newTok) newExpiry
       pure $ Right (accessToken newTok)
