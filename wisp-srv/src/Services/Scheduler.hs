@@ -13,8 +13,8 @@ import Data.Text.Encoding (encodeUtf8)
 import System.Log.FastLogger (pushLogStrLn, toLogStr)
 import App.Config (Config(..), PollingConfig(..))
 import App.Monad (App, Env(..), runApp, getConfig, getLogger)
-import Services.GmailPoller (pollGmail)
-import Services.CalendarPoller (pollCalendar)
+import Services.GmailPoller (pollAllGmail)
+import Services.CalendarPoller (pollAllCalendar)
 
 -- Helper to log within App monad
 logInfo :: T.Text -> App ()
@@ -22,24 +22,39 @@ logInfo msg = do
   loggerSet <- getLogger
   liftIO $ pushLogStrLn loggerSet $ toLogStr $ encodeUtf8 $ "[INFO] " <> msg
 
--- Run a single poll cycle
+-- Run a single poll cycle (polls all accounts)
 runPollCycle :: App ()
 runPollCycle = do
   logInfo "Starting poll cycle"
 
-  -- Poll Gmail
-  gmailResult <- pollGmail
-  case gmailResult of
-    Left err -> logInfo $ "Gmail poll error: " <> err
-    Right count -> logInfo $ "Gmail: imported " <> T.pack (show count) <> " messages"
+  -- Poll Gmail for all accounts
+  gmailResults <- pollAllGmail
+  case gmailResults of
+    [] -> logInfo "Gmail: no accounts configured"
+    _ -> do
+      let totalMsgs = sum [n | (_, Right n) <- gmailResults]
+      logInfo $ "Gmail: imported " <> T.pack (show totalMsgs) <> " messages total"
+      -- Log per-account results
+      mapM_ logAccountResult $ map (\(e, r) -> ("Gmail", e, r)) gmailResults
 
-  -- Poll Calendar
-  calResult <- pollCalendar
-  case calResult of
-    Left err -> logInfo $ "Calendar poll error: " <> err
-    Right count -> logInfo $ "Calendar: imported " <> T.pack (show count) <> " events"
+  -- Poll Calendar for all accounts
+  calResults <- pollAllCalendar
+  case calResults of
+    [] -> logInfo "Calendar: no accounts configured"
+    _ -> do
+      let totalEvents = sum [n | (_, Right n) <- calResults]
+      logInfo $ "Calendar: imported " <> T.pack (show totalEvents) <> " events total"
+      -- Log per-account results
+      mapM_ logAccountResult $ map (\(e, r) -> ("Calendar", e, r)) calResults
 
   logInfo "Poll cycle complete"
+
+-- Log result for a single account
+logAccountResult :: (T.Text, T.Text, Either T.Text Int) -> App ()
+logAccountResult (service, email, result) = case result of
+  Left err -> logInfo $ "  " <> service <> " [" <> email <> "]: error - " <> err
+  Right 0 -> pure ()  -- Don't log zero imports to reduce noise
+  Right n -> logInfo $ "  " <> service <> " [" <> email <> "]: " <> T.pack (show n) <> " new items"
 
 -- Start background polling
 startPolling :: Env -> IO ()

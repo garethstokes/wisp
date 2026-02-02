@@ -21,6 +21,7 @@ import Services.Scheduler (runPollCycle)
 activityToJson :: Activity -> Value
 activityToJson a = object
   [ "id" .= unEntityId (activityId a)
+  , "account_id" .= unEntityId (activityAccountId a)
   , "source" .= activitySource a
   , "source_id" .= activitySourceId a
   , "status" .= activityStatus a

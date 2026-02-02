@@ -4,12 +4,11 @@ module Main where
 import Control.Concurrent (threadDelay)
 import Control.Monad (when)
 import Data.Aeson (Value(..), decode)
+import Data.Foldable (toList)
 import Data.Text (Text, pack)
-import Data.Aeson.Types (Object)
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.Text.IO as TIO
 import Network.HTTP.Client
-import Network.HTTP.Client.TLS (tlsManagerSettings)
 import Options.Applicative
 import System.Process (callCommand)
 
@@ -102,8 +101,8 @@ checkAuthStatus manager = do
   req <- parseRequest $ baseUrl <> "/auth/status"
   response <- httpLbs req manager
   case decode (responseBody response) of
-    Just (Object obj) -> case KM.lookup "authenticated" obj of
-      Just (Bool b) -> return b
+    Just (Object obj) -> case KM.lookup "count" obj of
+      Just (Number n) -> return (n > 0)
       _ -> return False
     _ -> return False
 
@@ -130,22 +129,20 @@ runStatus = do
     Just _ -> TIO.putStrLn "Server:     online"
     Nothing -> TIO.putStrLn "Server:     offline"
 
-  -- Check auth status
+  -- Check auth status (show connected accounts)
   authReq <- parseRequest $ baseUrl <> "/auth/status"
   authResp <- httpLbs authReq manager
   case decode (responseBody authResp) of
     Just (Object obj) -> do
-      let authed = case KM.lookup "authenticated" obj of
-            Just (Bool b) -> b
-            _ -> False
-      if authed
-        then do
-          TIO.putStrLn "Google:     authenticated"
-          case KM.lookup "expires_at" obj of
-            Just (String expiry) -> TIO.putStrLn $ "Expires:    " <> expiry
+      case KM.lookup "count" obj of
+        Just (Number n) | n > 0 -> do
+          TIO.putStrLn $ "Accounts:   " <> showT (round n :: Int) <> " connected"
+          -- Show account emails
+          case KM.lookup "accounts" obj of
+            Just (Array accs) -> mapM_ showAccount (toList accs)
             _ -> return ()
-        else TIO.putStrLn "Google:     not authenticated"
-    _ -> TIO.putStrLn "Google:     unknown"
+        _ -> TIO.putStrLn "Accounts:   none connected"
+    _ -> TIO.putStrLn "Accounts:   unknown"
 
   -- Check activities count
   activitiesReq <- parseRequest $ baseUrl <> "/activities"
@@ -159,3 +156,10 @@ runStatus = do
 
 showT :: Show a => a -> Text
 showT = pack . show
+
+-- Show a single account from auth status
+showAccount :: Value -> IO ()
+showAccount (Object acc) = case KM.lookup "email" acc of
+  Just (String email) -> TIO.putStrLn $ "            - " <> email
+  _ -> return ()
+showAccount _ = return ()

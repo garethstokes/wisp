@@ -7,17 +7,19 @@ module Http.Handlers.Auth
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Reader (ReaderT)
 import Control.Monad.Trans.Class (lift)
-import Data.Aeson (object, (.=))
+import Data.Aeson (Value, object, (.=))
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Lazy as TL
-import Data.Time (addUTCTime, getCurrentTime)
+import Data.Time (UTCTime, addUTCTime, getCurrentTime)
 import Network.HTTP.Types.Status (status302, status400, status500)
 import Web.Scotty.Trans (ActionT, json, status, queryParamMaybe, setHeader)
 import App.Monad (Env, getConfig)
 import App.Config (Config(..), ServerConfig(..), GoogleConfig(..))
-import Infra.Google.Auth (OAuthConfig(..), buildAuthUrl, exchangeCode, TokenResponse(..))
-import Infra.Db.Auth (saveToken, getToken, AuthToken(..))
+import Infra.Google.Auth (OAuthConfig(..), buildAuthUrl, exchangeCode, getUserInfo, TokenResponse(..), UserInfo(..))
+import Infra.Db.Auth (saveToken)
+import Infra.Db.Account (upsertAccount, getAllAccounts)
+import Domain.Account (Account(..))
 
 -- Build OAuthConfig from app config
 mkOAuthConfig :: Config -> OAuthConfig
@@ -60,31 +62,45 @@ getGoogleCallback = do
             status status500
             json $ object ["error" .= err]
           Right tok -> do
-            now <- liftIO getCurrentTime
-            let expiresAt = addUTCTime (fromIntegral $ expiresIn tok) now
-            let refreshTok = maybe "" id (refreshToken tok)
-            _ <- lift $ saveToken "google" (accessToken tok) refreshTok expiresAt
-              ["https://www.googleapis.com/auth/gmail.readonly"
-              ,"https://www.googleapis.com/auth/calendar.readonly"
-              ]
-            json $ object
-              [ "status" .= ("authenticated" :: Text)
-              , "expires_at" .= expiresAt
-              ]
+            -- Get user info to auto-detect account
+            userInfoResult <- liftIO $ getUserInfo (accessToken tok)
+            case userInfoResult of
+              Left err -> do
+                status status500
+                json $ object ["error" .= ("Failed to get user info: " <> err)]
+              Right userInfo -> do
+                -- Upsert the account based on email
+                account <- lift $ upsertAccount (userEmail userInfo) (userName userInfo)
 
--- Check auth status
+                -- Save token for this account
+                now <- liftIO getCurrentTime
+                let expiresAt = addUTCTime (fromIntegral $ expiresIn tok) now
+                let refreshTok = maybe "" id (refreshToken tok)
+                _ <- lift $ saveToken (accountId account) "google" (accessToken tok) refreshTok expiresAt
+                  ["https://www.googleapis.com/auth/gmail.readonly"
+                  ,"https://www.googleapis.com/auth/calendar.readonly"
+                  ]
+                json $ object
+                  [ "status" .= ("authenticated" :: Text)
+                  , "email" .= accountEmail account
+                  , "expires_at" .= expiresAt
+                  ]
+
+-- Check auth status (shows all connected accounts)
 getAuthStatus :: ActionT (ReaderT Env IO) ()
 getAuthStatus = do
-  mtoken <- lift $ getToken "google"
-  case mtoken of
-    Nothing -> json $ object
-      [ "authenticated" .= False
-      ]
-    Just tok -> do
-      now <- liftIO getCurrentTime
-      let isValid = tokenExpiresAt tok > now
-      json $ object
-        [ "authenticated" .= isValid
-        , "provider" .= ("google" :: Text)
-        , "expires_at" .= tokenExpiresAt tok
-        ]
+  accounts <- lift getAllAccounts
+  now <- liftIO getCurrentTime
+  let accountInfos = map (accountToJson now) accounts
+  json $ object
+    [ "accounts" .= accountInfos
+    , "count" .= length accounts
+    ]
+
+-- Convert account to JSON object
+accountToJson :: UTCTime -> Account -> Data.Aeson.Value
+accountToJson _ acc = object
+  [ "email" .= accountEmail acc
+  , "display_name" .= accountDisplayName acc
+  , "created_at" .= accountCreatedAt acc
+  ]

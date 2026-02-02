@@ -11,7 +11,7 @@ import Data.Aeson (toJSON)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Time (UTCTime)
+import Data.Time (UTCTime, ZonedTime, zonedTimeToUTC)
 import Data.Time.Format.ISO8601 (iso8601ParseM)
 
 import App.Monad (App)
@@ -102,9 +102,19 @@ processEvents accId evts = do
   pure $ sum results
 
 -- | Parse event time from CalendarDateTime
+-- Handles both Z suffix and numeric timezone offsets like +00:00
 parseEventTime :: CalendarDateTime -> Maybe UTCTime
 parseEventTime dt = case dateTimeValue dt of
-  Just dtStr -> iso8601ParseM (T.unpack dtStr)
+  Just dtStr ->
+    let s = T.unpack dtStr
+    in -- Try parsing as UTCTime first (handles Z suffix)
+       case iso8601ParseM s :: Maybe UTCTime of
+         Just utc -> Just utc
+         Nothing ->
+           -- Try parsing as ZonedTime (handles +00:00 offsets) and convert
+           case iso8601ParseM s :: Maybe ZonedTime of
+             Just zt -> Just (zonedTimeToUTC zt)
+             Nothing -> Nothing
   Nothing -> Nothing
 
 -- Legacy: poll all accounts
