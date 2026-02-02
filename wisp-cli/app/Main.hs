@@ -3,7 +3,7 @@ module Main where
 
 import Control.Concurrent (threadDelay)
 import Control.Monad (when)
-import Data.Aeson (Value(..), decode)
+import Data.Aeson (Value(..), decode, encode, object, (.=))
 import Data.Foldable (toList)
 import Data.String (fromString)
 import Data.Text (Text, pack, unpack)
@@ -25,6 +25,7 @@ data Command
   | People
   | Activity Text
   | Logs Text
+  | Chat Text
   | Help
   deriving (Show)
 
@@ -41,11 +42,15 @@ commandParser = subparser
   <> command "people" (info (pure People) (progDesc "List known people"))
   <> command "activity" (info activityParser (progDesc "Show activity details"))
   <> command "logs" (info logsParser (progDesc "Show activity processing logs"))
+  <> command "chat" (info chatParser (progDesc "Ask Wisp a question"))
   <> command "help" (info (pure Help) (progDesc "Show help"))
   )
 
 logsParser :: Parser Command
 logsParser = Logs <$> strArgument (metavar "ID" <> help "Activity ID to show logs for")
+
+chatParser :: Parser Command
+chatParser = Chat <$> strArgument (metavar "MESSAGE" <> help "Message to send to Wisp")
 
 activityParser :: Parser Command
 activityParser = Activity <$> strArgument (metavar "ID" <> help "Activity ID to show")
@@ -81,6 +86,7 @@ main = do
     People -> runPeople
     Activity aid -> runActivity aid
     Logs aid -> runLogs aid
+    Chat msg -> runChat msg
     Help -> runHelp
 
 runHelp :: IO ()
@@ -98,6 +104,7 @@ runHelp = do
   TIO.putStrLn "  people       List known people"
   TIO.putStrLn "  activity ID  Show detailed activity info"
   TIO.putStrLn "  logs ID      Show activity processing logs"
+  TIO.putStrLn "  chat MSG     Ask Wisp a question"
   TIO.putStrLn "  help         Show this help"
   TIO.putStrLn ""
   TIO.putStrLn "Use --help for more details"
@@ -306,6 +313,25 @@ showLogEntry (Object log') = do
     Just conf -> TIO.putStrLn $ "    Confidence: " <> showT conf
     Nothing -> return ()
 showLogEntry _ = return ()
+
+runChat :: Text -> IO ()
+runChat msg = do
+  manager <- newManager defaultManagerSettings
+  initialReq <- parseRequest $ baseUrl <> "/chat"
+  let reqBody = object ["message" .= msg]
+  let req = initialReq
+        { method = "POST"
+        , requestHeaders = [("Content-Type", "application/json")]
+        , requestBody = RequestBodyLBS (encode reqBody)
+        }
+  response <- httpLbs req manager
+  case decode (responseBody response) of
+    Just (Object obj) -> case KM.lookup "message" obj of
+      Just (String s) -> TIO.putStrLn s
+      _ -> case KM.lookup "error" obj of
+        Just (String err) -> TIO.putStrLn $ "Error: " <> err
+        _ -> TIO.putStrLn "Unexpected response"
+    _ -> TIO.putStrLn "Failed to parse response"
 
 runClassify :: IO ()
 runClassify = do
