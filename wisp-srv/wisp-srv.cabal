@@ -40,6 +40,7 @@ executable wisp-srv
         Http.Handlers.Activities
         Http.Handlers.Auth
         Http.Handlers.Health
+        Http.Handlers.Pipeline
         Http.Routes
         Http.Server
         Infra.Db.Account

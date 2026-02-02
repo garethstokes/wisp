@@ -7,6 +7,7 @@ import Web.Scotty.Trans (ScottyT, get, post)
 import Http.Handlers.Health (getHealth)
 import Http.Handlers.Auth (getGoogleAuth, getGoogleCallback, getAuthStatus)
 import Http.Handlers.Activities (getActivities, getActivityById, triggerPoll)
+import Http.Handlers.Pipeline (postRunPipeline, postClassifyActivity)
 import App.Monad (Env)
 
 routes :: ScottyT (ReaderT Env IO) ()
@@ -25,3 +26,7 @@ routes = do
 
   -- Poll trigger
   post "/poll" triggerPoll
+
+  -- Classification pipeline
+  post "/pipeline/run" postRunPipeline
+  post "/activities/:id/classify" postClassifyActivity
