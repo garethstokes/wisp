@@ -30,6 +30,7 @@ executable wisp-srv
         App.Config
         App.Monad
         App.Env
+        Domain.Account
         Domain.Activity
         Domain.Id
         Domain.Schema
@@ -88,6 +89,8 @@ test-suite wisp-srv-test
         LambdaCase
         QuasiQuotes
     other-modules:
+        Domain.Account
+        Domain.AccountSpec
         Domain.Activity
         Domain.ActivitySpec
         Domain.Id
