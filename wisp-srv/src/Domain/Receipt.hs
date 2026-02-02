@@ -5,10 +5,10 @@ module Domain.Receipt
   , NewReceipt(..)
   ) where
 
-import Data.Aeson (ToJSON(..), FromJSON(..), withText)
+import Data.Aeson (ToJSON(..), FromJSON(..), object, (.=), withText)
 import Data.Text (Text)
 import Data.Time (UTCTime)
-import Domain.Id (EntityId)
+import Domain.Id (EntityId(..))
 
 data ReceiptAction
   = Classified
@@ -39,6 +39,16 @@ data Receipt = Receipt
   , receiptConfidence :: Maybe Double
   , receiptCreatedAt :: UTCTime
   } deriving (Show)
+
+instance ToJSON Receipt where
+  toJSON r = object
+    [ "id" .= unEntityId (receiptId r)
+    , "activity_id" .= unEntityId (receiptActivityId r)
+    , "action_taken" .= receiptActionTaken r
+    , "action_detail" .= receiptActionDetail r
+    , "confidence" .= receiptConfidence r
+    , "created_at" .= receiptCreatedAt r
+    ]
 
 data NewReceipt = NewReceipt
   { newReceiptActivityId :: EntityId

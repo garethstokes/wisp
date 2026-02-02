@@ -2,6 +2,7 @@
 module Http.Handlers.Activities
   ( getActivities
   , getActivityById
+  , getActivityLogs
   , getToday
   , approveActivity
   , dismissActivity
@@ -18,6 +19,7 @@ import App.Monad (Env)
 import Domain.Id (EntityId(..))
 import Domain.Activity (Activity(..), ActivityStatus(..))
 import Infra.Db.Activity (getActivitiesByStatus, getActivity, getActivitiesForToday, updateActivityStatus)
+import Infra.Db.Receipt (getReceiptsForActivity)
 import Services.Scheduler (runPollCycle)
 
 -- Convert Activity to JSON (full details including classification)
@@ -62,6 +64,23 @@ getActivityById = do
       status status404
       json $ object ["error" .= ("Activity not found" :: Text)]
     Just activity -> json $ activityToJson activity
+
+-- GET /activities/:id/logs - Get processing history for an activity
+getActivityLogs :: ActionT (ReaderT Env IO) ()
+getActivityLogs = do
+  aid <- pathParam "id"
+  mactivity <- lift $ getActivity (EntityId aid)
+  case mactivity of
+    Nothing -> do
+      status status404
+      json $ object ["error" .= ("Activity not found" :: Text)]
+    Just activity -> do
+      receipts <- lift $ getReceiptsForActivity (activityId activity)
+      json $ object
+        [ "activity_id" .= unEntityId (activityId activity)
+        , "logs" .= receipts
+        , "count" .= length receipts
+        ]
 
 -- GET /today - Activities requiring attention today
 getToday :: ActionT (ReaderT Env IO) ()
