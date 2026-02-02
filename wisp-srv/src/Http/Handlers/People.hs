@@ -14,10 +14,10 @@ import App.Monad (Env)
 import Domain.Id (EntityId(..))
 import qualified Infra.Db.Person as Db
 
--- GET /people - List all known people
+-- GET /people - List important people (linked to activities or have relationship)
 getPeople :: ActionT (ReaderT Env IO) ()
 getPeople = do
-  people <- lift Db.getAllPeople
+  people <- lift Db.getImportantPeople
   json $ object
     [ "people" .= people
     , "count" .= length people

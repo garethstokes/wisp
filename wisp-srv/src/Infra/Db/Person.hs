@@ -3,6 +3,7 @@ module Infra.Db.Person
   , getPersonByEmail
   , getPersonById
   , getAllPeople
+  , getImportantPeople
   , updatePersonContact
   ) where
 
@@ -84,6 +85,18 @@ getAllPeople = do
     "select id, email, display_name, personas, relationship, organisation, \
     \notes, first_contact, last_contact, contact_count, created_at \
     \from people order by last_contact desc nulls last"
+
+-- Get important people (linked to activities OR have relationship set)
+getImportantPeople :: App [Person]
+getImportantPeople = do
+  conn <- getConn
+  liftIO $ query_ conn
+    "select distinct p.id, p.email, p.display_name, p.personas, p.relationship, \
+    \p.organisation, p.notes, p.first_contact, p.last_contact, p.contact_count, p.created_at \
+    \from people p \
+    \where p.relationship is not null \
+    \   or exists (select 1 from activities a where a.person_id = p.id) \
+    \order by p.last_contact desc nulls last"
 
 -- Update last_contact and increment contact_count
 updatePersonContact :: EntityId -> App ()
