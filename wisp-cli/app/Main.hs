@@ -21,6 +21,7 @@ data Command
   | Today
   | Approve Text
   | Dismiss Text
+  | People
   | Help
   deriving (Show)
 
@@ -34,6 +35,7 @@ commandParser = subparser
   <> command "today" (info (pure Today) (progDesc "Show activities requiring attention"))
   <> command "approve" (info approveParser (progDesc "Approve a quarantined activity"))
   <> command "dismiss" (info dismissParser (progDesc "Dismiss/archive an activity"))
+  <> command "people" (info (pure People) (progDesc "List known people"))
   <> command "help" (info (pure Help) (progDesc "Show help"))
   )
 
@@ -65,6 +67,7 @@ main = do
     Today -> runToday
     Approve aid -> runApprove aid
     Dismiss aid -> runDismiss aid
+    People -> runPeople
     Help -> runHelp
 
 runHelp :: IO ()
@@ -79,6 +82,7 @@ runHelp = do
   TIO.putStrLn "  today        Show activities requiring attention"
   TIO.putStrLn "  approve ID   Approve a quarantined activity"
   TIO.putStrLn "  dismiss ID   Dismiss/archive an activity"
+  TIO.putStrLn "  people       List known people"
   TIO.putStrLn "  help         Show this help"
   TIO.putStrLn ""
   TIO.putStrLn "Use --help for more details"
@@ -165,6 +169,41 @@ runDismiss aid = do
         Just (String err) -> TIO.putStrLn $ "❌ Error: " <> err
         _ -> TIO.putStrLn "Dismiss request sent"
     _ -> TIO.putStrLn "❌ Failed to dismiss activity"
+
+runPeople :: IO ()
+runPeople = do
+  manager <- newManager defaultManagerSettings
+  req <- parseRequest $ baseUrl <> "/people"
+  response <- httpLbs req manager
+  case decode (responseBody response) of
+    Just (Object obj) -> do
+      case KM.lookup "people" obj of
+        Just (Array people) | not (null people) -> do
+          TIO.putStrLn "Known People:"
+          TIO.putStrLn "============="
+          mapM_ showPersonBrief (toList people)
+        _ -> TIO.putStrLn "No people found"
+      case KM.lookup "count" obj of
+        Just (Number n) -> TIO.putStrLn $ "\nTotal: " <> showT (round n :: Int) <> " people"
+        _ -> return ()
+    _ -> TIO.putStrLn "❌ Failed to fetch people"
+
+-- Show a brief person line
+showPersonBrief :: Value -> IO ()
+showPersonBrief (Object p) = do
+  let getEmail = case KM.lookup "email" p of
+        Just (String s) -> s
+        _ -> "(no email)"
+  let getName = case KM.lookup "display_name" p of
+        Just (String s) -> s
+        Just Null -> ""
+        _ -> ""
+  let getCount = case KM.lookup "contact_count" p of
+        Just (Number n) -> round n :: Int
+        _ -> 0
+  let displayName = if getName == "" then "" else " (" <> getName <> ")"
+  TIO.putStrLn $ "  📧 " <> getEmail <> displayName <> " - " <> showT getCount <> " contacts"
+showPersonBrief _ = return ()
 
 runClassify :: IO ()
 runClassify = do
