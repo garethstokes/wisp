@@ -125,6 +125,7 @@ test-suite wisp-srv-test
         Http.Handlers.Auth
         Http.Handlers.Health
         Http.Handlers.HealthSpec
+        Http.Handlers.People
         Http.Handlers.Pipeline
         Http.Routes
         Http.Server
