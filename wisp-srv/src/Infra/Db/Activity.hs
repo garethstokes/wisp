@@ -6,6 +6,8 @@ module Infra.Db.Activity
   , getActivity
   , getActivitiesByStatus
   , getActivitiesForToday
+  , getRecentActivities
+  , getTodaysCalendarEvents
   , updateActivityStatus
   , updateActivityClassification
   ) where
@@ -132,6 +134,35 @@ getActivitiesForToday limit = do
     \  created_at desc \
     \limit ?"
     (Only limit)
+
+-- Get activities from the last N hours
+getRecentActivities :: Int -> App [Activity]
+getRecentActivities hours = do
+  conn <- getConn
+  liftIO $ query conn
+    "select id, account_id, source, source_id, raw, status, title, summary, \
+    \sender_email, starts_at, ends_at, created_at, \
+    \personas, activity_type, urgency, autonomy_tier, confidence, person_id \
+    \from activities \
+    \where created_at > now() - interval '1 hour' * ? \
+    \order by created_at desc \
+    \limit 50"
+    (Only hours)
+
+-- Get today's calendar events
+getTodaysCalendarEvents :: App [Activity]
+getTodaysCalendarEvents = do
+  conn <- getConn
+  liftIO $ query conn
+    "select id, account_id, source, source_id, raw, status, title, summary, \
+    \sender_email, starts_at, ends_at, created_at, \
+    \personas, activity_type, urgency, autonomy_tier, confidence, person_id \
+    \from activities \
+    \where source = 'calendar' \
+    \  and starts_at >= date_trunc('day', now()) \
+    \  and starts_at < date_trunc('day', now()) + interval '1 day' \
+    \order by starts_at"
+    ()
 
 -- Get activities by status
 getActivitiesByStatus :: ActivityStatus -> Int -> App [Activity]
