@@ -6,7 +6,7 @@ import Control.Monad.Reader (ReaderT)
 import Web.Scotty.Trans (ScottyT, get, post)
 import Http.Handlers.Health (getHealth)
 import Http.Handlers.Auth (getGoogleAuth, getGoogleCallback, getAuthStatus)
-import Http.Handlers.Activities (getActivities, getActivityById, getToday, triggerPoll)
+import Http.Handlers.Activities (getActivities, getActivityById, getToday, approveActivity, dismissActivity, triggerPoll)
 import Http.Handlers.Pipeline (postRunPipeline, postClassifyActivity)
 import App.Monad (Env)
 
@@ -27,6 +27,10 @@ routes = do
 
   -- Poll trigger
   post "/poll" triggerPoll
+
+  -- Activity actions
+  post "/activities/:id/approve" approveActivity
+  post "/activities/:id/dismiss" dismissActivity
 
   -- Classification pipeline
   post "/pipeline/run" postRunPipeline

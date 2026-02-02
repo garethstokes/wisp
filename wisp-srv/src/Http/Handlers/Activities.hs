@@ -3,6 +3,8 @@ module Http.Handlers.Activities
   ( getActivities
   , getActivityById
   , getToday
+  , approveActivity
+  , dismissActivity
   , triggerPoll
   ) where
 
@@ -15,7 +17,7 @@ import Web.Scotty.Trans (ActionT, json, status, pathParam)
 import App.Monad (Env)
 import Domain.Id (EntityId(..))
 import Domain.Activity (Activity(..), ActivityStatus(..))
-import Infra.Db.Activity (getActivitiesByStatus, getActivity, getActivitiesForToday)
+import Infra.Db.Activity (getActivitiesByStatus, getActivity, getActivitiesForToday, updateActivityStatus)
 import Services.Scheduler (runPollCycle)
 
 -- Convert Activity to JSON (full details including classification)
@@ -75,6 +77,40 @@ getToday = do
     , "high_urgency" .= map activityToJson highUrgency
     , "total" .= length activities
     ]
+
+-- POST /activities/:id/approve - Move quarantined to surfaced
+approveActivity :: ActionT (ReaderT Env IO) ()
+approveActivity = do
+  aid <- pathParam "id"
+  mactivity <- lift $ getActivity (EntityId aid)
+  case mactivity of
+    Nothing -> do
+      status status404
+      json $ object ["error" .= ("Activity not found" :: Text)]
+    Just activity -> do
+      lift $ updateActivityStatus (activityId activity) Surfaced
+      json $ object
+        [ "status" .= ("approved" :: Text)
+        , "id" .= unEntityId (activityId activity)
+        , "new_status" .= ("surfaced" :: Text)
+        ]
+
+-- POST /activities/:id/dismiss - Archive an activity
+dismissActivity :: ActionT (ReaderT Env IO) ()
+dismissActivity = do
+  aid <- pathParam "id"
+  mactivity <- lift $ getActivity (EntityId aid)
+  case mactivity of
+    Nothing -> do
+      status status404
+      json $ object ["error" .= ("Activity not found" :: Text)]
+    Just activity -> do
+      lift $ updateActivityStatus (activityId activity) Archived
+      json $ object
+        [ "status" .= ("dismissed" :: Text)
+        , "id" .= unEntityId (activityId activity)
+        , "new_status" .= ("archived" :: Text)
+        ]
 
 -- POST /poll
 triggerPoll :: ActionT (ReaderT Env IO) ()
