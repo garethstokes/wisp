@@ -66,6 +66,7 @@ executable wisp-srv
         Services.Pipeline
         Services.Router
         Services.Scheduler
+        Services.Chat
     build-depends:
         base >=4.17 && <5,
         text,
@@ -172,6 +173,8 @@ test-suite wisp-srv-test
         Services.Router
         Services.RouterSpec
         Services.Scheduler
+        Services.Chat
+        Services.ChatSpec
         TestEnv
     build-tool-depends:
         hspec-discover:hspec-discover
