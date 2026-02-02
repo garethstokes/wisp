@@ -29,8 +29,8 @@ import Infra.Google.Calendar
   )
 import Infra.Google.TokenManager (getValidTokenForAccount, getAllValidTokens, TokenError(..))
 
--- | Poll Calendar for ALL accounts
-pollAllCalendar :: App [(Text, Either Text Int)]
+-- | Poll Calendar for ALL accounts, returns (email, Either error [newActivityIds])
+pollAllCalendar :: App [(Text, Either Text [EntityId])]
 pollAllCalendar = do
   tokensWithAccounts <- getAllValidTokens
   forM tokensWithAccounts $ \(acc, tokenResult) -> do
@@ -41,7 +41,7 @@ pollAllCalendar = do
     pure (accountEmail acc, result)
 
 -- | Poll Calendar for a specific account
-pollCalendarForAccount :: Account -> App (Either Text Int)
+pollCalendarForAccount :: Account -> App (Either Text [EntityId])
 pollCalendarForAccount acc = do
   tokenResult <- getValidTokenForAccount (accountId acc)
   case tokenResult of
@@ -50,7 +50,7 @@ pollCalendarForAccount acc = do
     Right accessToken -> pollCalendarWithToken (accountId acc) accessToken
 
 -- | Poll Calendar with a specific token for an account
-pollCalendarWithToken :: EntityId -> Text -> App (Either Text Int)
+pollCalendarWithToken :: EntityId -> Text -> App (Either Text [EntityId])
 pollCalendarWithToken accId accessToken = do
   ensurePollStateExists accId "calendar"
   mPollState <- getPollStateForAccount accId "calendar"
@@ -66,22 +66,23 @@ pollCalendarWithToken accId accessToken = do
         else pure $ Left err
     Right eventList -> do
       let evts = fromMaybe [] (events eventList)
-      count <- processEvents accId evts
+      newIds <- processEvents accId evts
       case nextSyncToken eventList of
         Just newToken -> updatePollStateForAccount accId "calendar" (Just newToken)
         Nothing -> pure ()
-      pure $ Right count
+      pure $ Right newIds
 
 -- | Process a list of calendar events
-processEvents :: EntityId -> [CalendarEvent] -> App Int
+-- Returns list of newly created activity IDs
+processEvents :: EntityId -> [CalendarEvent] -> App [EntityId]
 processEvents accId evts = do
   results <- forM evts $ \evt -> do
     case eventStatus evt of
-      Just "cancelled" -> pure 0
+      Just "cancelled" -> pure Nothing
       _ -> do
         exists <- activityExistsForAccount accId Calendar (eventId evt)
         if exists
-          then pure 0
+          then pure Nothing
           else do
             let startTime = eventStart evt >>= parseEventTime
             let endTime = eventEnd evt >>= parseEventTime
@@ -95,11 +96,8 @@ processEvents accId evts = do
                   , newActivityStartsAt = startTime
                   , newActivityEndsAt = endTime
                   }
-            result <- insertActivity newActivity
-            pure $ case result of
-              Just _ -> 1
-              Nothing -> 0
-  pure $ sum results
+            insertActivity newActivity
+  pure $ [aid | Just aid <- results]
 
 -- | Parse event time from CalendarDateTime
 -- Handles both Z suffix and numeric timezone offsets like +00:00
@@ -118,9 +116,9 @@ parseEventTime dt = case dateTimeValue dt of
   Nothing -> Nothing
 
 -- Legacy: poll all accounts
-pollCalendar :: App (Either Text Int)
+pollCalendar :: App (Either Text [EntityId])
 pollCalendar = do
   results <- pollAllCalendar
   case results of
     [] -> pure $ Left "No accounts configured"
-    _ -> pure $ Right $ sum [n | (_, Right n) <- results]
+    _ -> pure $ Right $ concat [ids | (_, Right ids) <- results]

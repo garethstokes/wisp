@@ -13,11 +13,10 @@ import Data.Text.Encoding (encodeUtf8)
 import System.Log.FastLogger (pushLogStrLn, toLogStr)
 import App.Config (Config(..), PollingConfig(..))
 import App.Monad (App, Env(..), runApp, getConfig, getLogger, getClassificationQueue)
-import Domain.Activity (Activity(..), ActivityStatus(..))
+import Domain.Id (EntityId)
 import Services.GmailPoller (pollAllGmail)
 import Services.CalendarPoller (pollAllCalendar)
 import Services.ClassificationQueue (enqueueActivities)
-import Infra.Db.Activity (getActivitiesByStatus)
 
 -- Helper to log within App monad
 logInfo :: T.Text -> App ()
@@ -32,41 +31,43 @@ runPollCycle = do
 
   -- Poll Gmail for all accounts
   gmailResults <- pollAllGmail
-  case gmailResults of
-    [] -> logInfo "Gmail: no accounts configured"
+  gmailIds <- case gmailResults of
+    [] -> do
+      logInfo "Gmail: no accounts configured"
+      pure []
     _ -> do
-      let totalMsgs = sum [n | (_, Right n) <- gmailResults]
-      logInfo $ "Gmail: imported " <> T.pack (show totalMsgs) <> " messages total"
+      let allIds = concat [ids | (_, Right ids) <- gmailResults]
+      logInfo $ "Gmail: imported " <> T.pack (show (length allIds)) <> " messages total"
       -- Log per-account results
-      mapM_ logAccountResult $ map (\(e, r) -> ("Gmail", e, r)) gmailResults
+      mapM_ logAccountResult $ map (\(e, r) -> ("Gmail", e, fmap length r)) gmailResults
+      pure allIds
 
   -- Poll Calendar for all accounts
   calResults <- pollAllCalendar
-  case calResults of
-    [] -> logInfo "Calendar: no accounts configured"
+  calIds <- case calResults of
+    [] -> do
+      logInfo "Calendar: no accounts configured"
+      pure []
     _ -> do
-      let totalEvents = sum [n | (_, Right n) <- calResults]
-      logInfo $ "Calendar: imported " <> T.pack (show totalEvents) <> " events total"
+      let allIds = concat [ids | (_, Right ids) <- calResults]
+      logInfo $ "Calendar: imported " <> T.pack (show (length allIds)) <> " events total"
       -- Log per-account results
-      mapM_ logAccountResult $ map (\(e, r) -> ("Calendar", e, r)) calResults
+      mapM_ logAccountResult $ map (\(e, r) -> ("Calendar", e, fmap length r)) calResults
+      pure allIds
 
-  -- Enqueue pending activities for classification workers
-  enqueueCount <- enqueuePendingActivities
-  case enqueueCount of
-    0 -> pure ()
-    n -> logInfo $ "Enqueued " <> T.pack (show n) <> " activities for classification"
+  -- Enqueue newly imported activities for classification
+  let newIds = gmailIds ++ calIds
+  enqueueForClassification newIds
 
   logInfo "Poll cycle complete"
 
--- Enqueue all pending activities for classification
-enqueuePendingActivities :: App Int
-enqueuePendingActivities = do
+-- Enqueue specific activity IDs for classification
+enqueueForClassification :: [EntityId] -> App ()
+enqueueForClassification [] = pure ()
+enqueueForClassification ids = do
   queue <- getClassificationQueue
-  -- Get all pending activities (use a large limit to get them all)
-  pending <- getActivitiesByStatus Pending 10000
-  let activityIds = map activityId pending
-  liftIO $ enqueueActivities queue activityIds
-  pure $ length activityIds
+  liftIO $ enqueueActivities queue ids
+  logInfo $ "Enqueued " <> T.pack (show (length ids)) <> " activities for classification"
 
 -- Log result for a single account
 logAccountResult :: (T.Text, T.Text, Either T.Text Int) -> App ()

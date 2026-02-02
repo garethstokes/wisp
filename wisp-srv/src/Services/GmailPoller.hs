@@ -33,8 +33,8 @@ import Infra.Google.Gmail
   )
 import Infra.Google.TokenManager (getValidTokenForAccount, getAllValidTokens, TokenError(..))
 
--- | Poll Gmail for ALL accounts
-pollAllGmail :: App [(Text, Either Text Int)]
+-- | Poll Gmail for ALL accounts, returns (email, Either error [newActivityIds])
+pollAllGmail :: App [(Text, Either Text [EntityId])]
 pollAllGmail = do
   tokensWithAccounts <- getAllValidTokens
   forM tokensWithAccounts $ \(acc, tokenResult) -> do
@@ -45,7 +45,7 @@ pollAllGmail = do
     pure (accountEmail acc, result)
 
 -- | Poll Gmail for a specific account
-pollGmailForAccount :: Account -> App (Either Text Int)
+pollGmailForAccount :: Account -> App (Either Text [EntityId])
 pollGmailForAccount acc = do
   tokenResult <- getValidTokenForAccount (accountId acc)
   case tokenResult of
@@ -54,7 +54,7 @@ pollGmailForAccount acc = do
     Right accessToken -> pollGmailWithToken (accountId acc) accessToken
 
 -- | Poll Gmail with a specific token for an account
-pollGmailWithToken :: EntityId -> Text -> App (Either Text Int)
+pollGmailWithToken :: EntityId -> Text -> App (Either Text [EntityId])
 pollGmailWithToken accId accessToken = do
   -- Ensure poll state exists for this account
   ensurePollStateExists accId "gmail"
@@ -66,28 +66,28 @@ pollGmailWithToken accId accessToken = do
       Just cursor -> incrementalPoll accId accessToken cursor
 
 -- | Initial poll: fetch recent messages when no cursor exists
-initialPoll :: EntityId -> Text -> App (Either Text Int)
+initialPoll :: EntityId -> Text -> App (Either Text [EntityId])
 initialPoll accId accessToken = do
   result <- liftIO $ listMessages accessToken Nothing
   case result of
     Left err -> pure $ Left err
     Right msgList -> do
       let refs = fromMaybe [] (messages msgList)
-      count <- processMessageRefs accId accessToken refs
+      newIds <- processMessageRefs accId accessToken refs
       case refs of
-        [] -> pure $ Right 0
+        [] -> pure $ Right []
         (firstRef:_) -> do
           firstMsgResult <- liftIO $ getMessage accessToken (refId firstRef)
           case firstMsgResult of
             Left _ -> do
               updatePollStateForAccount accId "gmail" (Just $ refId firstRef)
-              pure $ Right count
+              pure $ Right newIds
             Right firstMsg -> do
               updatePollStateForAccount accId "gmail" (gmailHistoryId firstMsg)
-              pure $ Right count
+              pure $ Right newIds
 
 -- | Incremental poll: use history API to get new messages since last cursor
-incrementalPoll :: EntityId -> Text -> Text -> App (Either Text Int)
+incrementalPoll :: EntityId -> Text -> Text -> App (Either Text [EntityId])
 incrementalPoll accId accessToken cursor = do
   result <- liftIO $ listHistory accessToken cursor Nothing
   case result of
@@ -97,10 +97,10 @@ incrementalPoll accId accessToken cursor = do
         else pure $ Left err
     Right histList -> do
       let refs = extractRefsFromHistory histList
-      count <- processMessageRefs accId accessToken refs
+      newIds <- processMessageRefs accId accessToken refs
       let newCursor = historyId histList
       updatePollStateForAccount accId "gmail" newCursor
-      pure $ Right count
+      pure $ Right newIds
 
 -- | Extract message refs from history records
 extractRefsFromHistory :: GmailHistoryList -> [GmailMessageRef]
@@ -113,17 +113,18 @@ extractRefsFromHistory histList =
   in concatMap extractFromHistory histories
 
 -- | Process a list of message refs: fetch full message and insert as activity
-processMessageRefs :: EntityId -> Text -> [GmailMessageRef] -> App Int
+-- Returns list of newly created activity IDs
+processMessageRefs :: EntityId -> Text -> [GmailMessageRef] -> App [EntityId]
 processMessageRefs accId accessToken refs = do
   results <- forM refs $ \ref -> do
     -- Check if already exists for this account
     exists <- activityExistsForAccount accId Email (refId ref)
     if exists
-      then pure 0
+      then pure Nothing
       else do
         msgResult <- liftIO $ getMessage accessToken (refId ref)
         case msgResult of
-          Left _ -> pure 0
+          Left _ -> pure Nothing
           Right msg -> do
             let (subject, sender) = extractEmailInfo msg
             let newActivity = NewActivity
@@ -136,11 +137,8 @@ processMessageRefs accId accessToken refs = do
                   , newActivityStartsAt = Nothing
                   , newActivityEndsAt = Nothing
                   }
-            result <- insertActivity newActivity
-            pure $ case result of
-              Just _ -> 1
-              Nothing -> 0
-  pure $ sum results
+            insertActivity newActivity
+  pure $ [aid | Just aid <- results]
 
 -- | Extract subject and sender email from a Gmail message
 extractEmailInfo :: GmailMessage -> (Maybe Text, Maybe Text)
@@ -160,9 +158,9 @@ extractEmailInfo msg =
           in (subject, sender)
 
 -- Legacy: poll using first available token
-pollGmail :: App (Either Text Int)
+pollGmail :: App (Either Text [EntityId])
 pollGmail = do
   results <- pollAllGmail
   case results of
     [] -> pure $ Left "No accounts configured"
-    _ -> pure $ Right $ sum [n | (_, Right n) <- results]
+    _ -> pure $ Right $ concat [ids | (_, Right ids) <- results]
