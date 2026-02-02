@@ -72,7 +72,8 @@ executable wisp-srv
         mwc-random,
         directory,
         filepath,
-        async
+        async,
+        neat-interpolation
 
 test-suite wisp-srv-test
     import:           warnings
@@ -157,4 +158,5 @@ test-suite wisp-srv-test
         http-client-tls,
         http-types,
         hspec,
-        async
+        async,
+        neat-interpolation
