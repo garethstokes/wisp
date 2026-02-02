@@ -24,6 +24,7 @@ data Command
   | Dismiss Text
   | People
   | Activity Text
+  | Logs Text
   | Help
   deriving (Show)
 
@@ -39,8 +40,12 @@ commandParser = subparser
   <> command "dismiss" (info dismissParser (progDesc "Dismiss/archive an activity"))
   <> command "people" (info (pure People) (progDesc "List known people"))
   <> command "activity" (info activityParser (progDesc "Show activity details"))
+  <> command "logs" (info logsParser (progDesc "Show activity processing logs"))
   <> command "help" (info (pure Help) (progDesc "Show help"))
   )
+
+logsParser :: Parser Command
+logsParser = Logs <$> strArgument (metavar "ID" <> help "Activity ID to show logs for")
 
 activityParser :: Parser Command
 activityParser = Activity <$> strArgument (metavar "ID" <> help "Activity ID to show")
@@ -75,6 +80,7 @@ main = do
     Dismiss aid -> runDismiss aid
     People -> runPeople
     Activity aid -> runActivity aid
+    Logs aid -> runLogs aid
     Help -> runHelp
 
 runHelp :: IO ()
@@ -91,6 +97,7 @@ runHelp = do
   TIO.putStrLn "  dismiss ID   Dismiss/archive an activity"
   TIO.putStrLn "  people       List known people"
   TIO.putStrLn "  activity ID  Show detailed activity info"
+  TIO.putStrLn "  logs ID      Show activity processing logs"
   TIO.putStrLn "  help         Show this help"
   TIO.putStrLn ""
   TIO.putStrLn "Use --help for more details"
@@ -257,6 +264,48 @@ showArrayField label key obj = case KM.lookup (fromString $ unpack key) obj of
     let items = [s | String s <- toList arr]
     TIO.putStrLn $ label <> ": " <> pack (show items)
   _ -> return ()
+
+runLogs :: Text -> IO ()
+runLogs aid = do
+  manager <- newManager defaultManagerSettings
+  req <- parseRequest $ baseUrl <> "/activities/" <> unpack aid <> "/logs"
+  response <- httpLbs req manager
+  case decode (responseBody response) of
+    Just (Object obj) -> do
+      TIO.putStrLn $ "Processing Logs for Activity " <> aid
+      TIO.putStrLn "======================================="
+      case KM.lookup "logs" obj of
+        Just (Array logs) | not (null logs) -> mapM_ showLogEntry (toList logs)
+        _ -> TIO.putStrLn "No logs found"
+      case KM.lookup "count" obj of
+        Just (Number n) -> TIO.putStrLn $ "\nTotal: " <> showT (round n :: Int) <> " log entries"
+        _ -> return ()
+    _ -> TIO.putStrLn "❌ Failed to fetch logs"
+
+-- Show a single log entry
+showLogEntry :: Value -> IO ()
+showLogEntry (Object log') = do
+  let getAction = case KM.lookup "action_taken" log' of
+        Just (String s) -> s
+        _ -> "unknown"
+  let getDetail = case KM.lookup "action_detail" log' of
+        Just (String s) -> Just s
+        Just Null -> Nothing
+        _ -> Nothing
+  let getConfidence = case KM.lookup "confidence" log' of
+        Just (Number n) -> Just n
+        _ -> Nothing
+  let getTime = case KM.lookup "created_at" log' of
+        Just (String s) -> s
+        _ -> ""
+  TIO.putStrLn $ "  " <> getTime <> " - " <> getAction
+  case getDetail of
+    Just detail -> TIO.putStrLn $ "    Detail: " <> detail
+    Nothing -> return ()
+  case getConfidence of
+    Just conf -> TIO.putStrLn $ "    Confidence: " <> showT conf
+    Nothing -> return ()
+showLogEntry _ = return ()
 
 runClassify :: IO ()
 runClassify = do
