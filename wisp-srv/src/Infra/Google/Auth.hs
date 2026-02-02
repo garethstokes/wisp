@@ -1,9 +1,11 @@
 module Infra.Google.Auth
   ( OAuthConfig(..)
   , TokenResponse(..)
+  , UserInfo(..)
   , buildAuthUrl
   , exchangeCode
   , refreshAccessToken
+  , getUserInfo
   ) where
 
 import Data.Aeson (FromJSON(..), (.:), (.:?), withObject)
@@ -12,6 +14,7 @@ import qualified Data.ByteString.Char8 as BS
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
+import GHC.Generics (Generic)
 import Network.HTTP.Client
 import Network.HTTP.Client.TLS (tlsManagerSettings)
 
@@ -34,6 +37,18 @@ instance FromJSON TokenResponse where
     <*> v .:? "refresh_token"
     <*> v .: "expires_in"
     <*> v .: "token_type"
+
+data UserInfo = UserInfo
+  { userEmail :: Text
+  , userName :: Maybe Text
+  , userPicture :: Maybe Text
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON UserInfo where
+  parseJSON = withObject "UserInfo" $ \v -> UserInfo
+    <$> v .: "email"
+    <*> v .:? "name"
+    <*> v .:? "picture"
 
 -- URL-encode a text value
 urlEncode :: Text -> Text
@@ -107,3 +122,17 @@ refreshAccessToken cfg refreshTok = do
   pure $ case Aeson.decode (responseBody response) of
     Just tok -> Right tok
     Nothing -> Left "Failed to parse refresh token response"
+
+-- Fetch user info using access token
+getUserInfo :: Text -> IO (Either Text UserInfo)
+getUserInfo accessToken = do
+  manager <- newManager tlsManagerSettings
+  let url = "https://www.googleapis.com/oauth2/v2/userinfo"
+  req <- parseRequest url
+  let authReq = req
+        { requestHeaders = [("Authorization", "Bearer " <> encodeUtf8 accessToken)]
+        }
+  response <- httpLbs authReq manager
+  pure $ case Aeson.decode (responseBody response) of
+    Just ui -> Right ui
+    Nothing -> Left $ "Failed to parse userinfo: " <> T.pack (show $ responseBody response)
