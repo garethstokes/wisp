@@ -116,7 +116,7 @@ getActivity aid = do
     [a] -> Just a
     _ -> Nothing
 
--- Get activities for "today" view: surfaced, high-urgency pending, and quarantined
+-- Get activities for "today" view: surfaced/quarantined/high-urgency items from today
 getActivitiesForToday :: Int -> App [Activity]
 getActivitiesForToday limit = do
   conn <- getConn
@@ -125,9 +125,10 @@ getActivitiesForToday limit = do
     \sender_email, starts_at, ends_at, created_at, \
     \personas, activity_type, urgency, autonomy_tier, confidence, person_id \
     \from activities \
-    \where status = 'surfaced' \
-    \   or status = 'quarantined' \
-    \   or (status = 'pending' and urgency = 'high') \
+    \where (status = 'surfaced' \
+    \       or status = 'quarantined' \
+    \       or (status = 'pending' and urgency = 'high')) \
+    \  and (date(coalesce(starts_at, created_at)) = current_date) \
     \order by \
     \  case status \
     \    when 'quarantined' then 1 \
@@ -139,7 +140,7 @@ getActivitiesForToday limit = do
     \    when 'normal' then 2 \
     \    else 3 \
     \  end, \
-    \  created_at desc \
+    \  coalesce(starts_at, created_at) asc \
     \limit ?"
     (Only limit)
 
