@@ -60,6 +60,7 @@ executable wisp-srv
         Services.Classifier
         Services.GmailPoller
         Services.PeopleResolver
+        Services.Pipeline
         Services.Router
         Services.Scheduler
     build-depends:
@@ -159,6 +160,8 @@ test-suite wisp-srv-test
         Services.GmailPollerSpec
         Services.PeopleResolver
         Services.PeopleResolverSpec
+        Services.Pipeline
+        Services.PipelineSpec
         Services.Router
         Services.RouterSpec
         Services.Scheduler
