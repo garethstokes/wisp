@@ -1,16 +1,20 @@
 module Services.Chat
   ( assembleContext
-  , buildPrompt
+  , buildSystemPrompt
   , processChat
   ) where
 
+import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Reader (asks)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Domain.Activity (Activity(..), ActivityStatus(..))
 import Domain.Chat (ChatContext(..))
 import Infra.Db.Activity (getRecentActivities, getTodaysCalendarEvents, getActivitiesByStatus)
-import App.Monad (App)
+import Infra.Claude.Client (callClaudeWithSystem)
+import App.Monad (App, Env(..))
+import App.Config (Config(..), ClaudeConfig(..))
 
 -- Assemble context for the LLM
 assembleContext :: Text -> App ChatContext
@@ -24,12 +28,12 @@ assembleContext _query = do
     , contextRecentActivities = recent
     , contextQuarantineCount = length quarantined
     , contextSurfacedCount = length surfaced
-    , contextMentionedPeople = []  -- TODO: extract mentions from query
+    , contextMentionedPeople = []
     }
 
--- Build the prompt for Claude
-buildPrompt :: ChatContext -> Text -> Text
-buildPrompt ctx query = T.unlines
+-- Build the system prompt with context
+buildSystemPrompt :: ChatContext -> Text
+buildSystemPrompt ctx = T.unlines
   [ "You are Wisp, a personal assistant. You help by providing information"
   , "and options, never pressure or demands."
   , ""
@@ -42,13 +46,10 @@ buildPrompt ctx query = T.unlines
   , "## Today's Calendar"
   , formatCalendar (contextCalendarEvents ctx)
   , ""
-  , "## Recent Activity Summary"
+  , "## Context"
   , "- " <> T.pack (show (length (contextRecentActivities ctx))) <> " activities in last 24 hours"
-  , "- " <> T.pack (show (contextQuarantineCount ctx)) <> " items in quarantine"
+  , "- " <> T.pack (show (contextQuarantineCount ctx)) <> " items in quarantine needing review"
   , "- " <> T.pack (show (contextSurfacedCount ctx)) <> " items surfaced for attention"
-  , ""
-  , "## User Question"
-  , query
   ]
 
 formatCalendar :: [Activity] -> Text
@@ -58,12 +59,15 @@ formatCalendar events = T.unlines $ map formatEvent events
     formatEvent a = "- " <> fromMaybe "(no title)" (activityTitle a)
       <> maybe "" (\t -> " at " <> T.pack (show t)) (activityStartsAt a)
 
--- Process a chat message (context assembly + LLM call placeholder)
-processChat :: Text -> App Text
+-- Process a chat message
+processChat :: Text -> App (Either Text Text)
 processChat query = do
   ctx <- assembleContext query
-  let prompt = buildPrompt ctx query
-  -- For now, return the prompt as a placeholder
-  -- Will be replaced with actual LLM call in next task
-  pure $ "I received your question: " <> query <> "\n\n[Debug: prompt length = "
-    <> T.pack (show (T.length prompt)) <> " chars]"
+  let systemPrompt = buildSystemPrompt ctx
+  claudeCfg <- asks (claude . config)
+  result <- liftIO $ callClaudeWithSystem
+    (apiKey claudeCfg)
+    (model claudeCfg)
+    systemPrompt
+    query
+  pure result

@@ -2,6 +2,7 @@ module Infra.Claude.Client
   ( ClaudeResponse(..)
   , ClaudeContent(..)
   , callClaude
+  , callClaudeWithSystem
   , responseText
   ) where
 
@@ -53,6 +54,39 @@ callClaude apiKey model prompt = do
         [ "model" .= model
         , "max_tokens" .= (1024 :: Int)
         , "messages" .= [object ["role" .= ("user" :: Text), "content" .= prompt]]
+        ]
+  let req = initReq
+        { method = "POST"
+        , requestHeaders =
+            [ ("Content-Type", "application/json")
+            , ("x-api-key", encodeUtf8 apiKey)
+            , ("anthropic-version", "2023-06-01")
+            ]
+        , requestBody = RequestBodyLBS (encode reqBody)
+        }
+  response <- httpLbs req manager
+  let status = statusCode (responseStatus response)
+  if status == 200
+    then case decodeResponse (responseBody response) of
+      Just txt -> pure $ Right txt
+      Nothing -> pure $ Left "Failed to parse Claude response"
+    else pure $ Left $ "Claude API error: " <> decodeUtf8 (toStrict $ responseBody response)
+  where
+    decodeResponse body = do
+      resp <- Aeson.decode body :: Maybe ClaudeResponse
+      responseText resp
+
+-- Call Claude API with system prompt
+callClaudeWithSystem :: Text -> Text -> Text -> Text -> IO (Either Text Text)
+callClaudeWithSystem apiKey model systemPrompt userMessage = do
+  manager <- newManager tlsManagerSettings
+  let url = "https://api.anthropic.com/v1/messages"
+  initReq <- parseRequest url
+  let reqBody = object
+        [ "model" .= model
+        , "max_tokens" .= (2048 :: Int)
+        , "system" .= systemPrompt
+        , "messages" .= [object ["role" .= ("user" :: Text), "content" .= userMessage]]
         ]
   let req = initReq
         { method = "POST"
