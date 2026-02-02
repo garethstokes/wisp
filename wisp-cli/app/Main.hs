@@ -5,6 +5,7 @@ import Control.Concurrent (threadDelay)
 import Control.Monad (when)
 import Data.Aeson (Value(..), decode)
 import Data.Foldable (toList)
+import Data.String (fromString)
 import Data.Text (Text, pack, unpack)
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.Text.IO as TIO
@@ -22,6 +23,7 @@ data Command
   | Approve Text
   | Dismiss Text
   | People
+  | Activity Text
   | Help
   deriving (Show)
 
@@ -36,8 +38,12 @@ commandParser = subparser
   <> command "approve" (info approveParser (progDesc "Approve a quarantined activity"))
   <> command "dismiss" (info dismissParser (progDesc "Dismiss/archive an activity"))
   <> command "people" (info (pure People) (progDesc "List known people"))
+  <> command "activity" (info activityParser (progDesc "Show activity details"))
   <> command "help" (info (pure Help) (progDesc "Show help"))
   )
+
+activityParser :: Parser Command
+activityParser = Activity <$> strArgument (metavar "ID" <> help "Activity ID to show")
 
 approveParser :: Parser Command
 approveParser = Approve <$> strArgument (metavar "ID" <> help "Activity ID to approve")
@@ -68,6 +74,7 @@ main = do
     Approve aid -> runApprove aid
     Dismiss aid -> runDismiss aid
     People -> runPeople
+    Activity aid -> runActivity aid
     Help -> runHelp
 
 runHelp :: IO ()
@@ -83,6 +90,7 @@ runHelp = do
   TIO.putStrLn "  approve ID   Approve a quarantined activity"
   TIO.putStrLn "  dismiss ID   Dismiss/archive an activity"
   TIO.putStrLn "  people       List known people"
+  TIO.putStrLn "  activity ID  Show detailed activity info"
   TIO.putStrLn "  help         Show this help"
   TIO.putStrLn ""
   TIO.putStrLn "Use --help for more details"
@@ -204,6 +212,51 @@ showPersonBrief (Object p) = do
   let displayName = if getName == "" then "" else " (" <> getName <> ")"
   TIO.putStrLn $ "  📧 " <> getEmail <> displayName <> " - " <> showT getCount <> " contacts"
 showPersonBrief _ = return ()
+
+runActivity :: Text -> IO ()
+runActivity aid = do
+  manager <- newManager defaultManagerSettings
+  req <- parseRequest $ baseUrl <> "/activities/" <> unpack aid
+  response <- httpLbs req manager
+  case decode (responseBody response) of
+    Just (Object act) -> do
+      TIO.putStrLn "Activity Details"
+      TIO.putStrLn "================"
+      showField "ID" "id" act
+      showField "Title" "title" act
+      showField "Status" "status" act
+      showField "Source" "source" act
+      showField "Sender" "sender_email" act
+      showField "Summary" "summary" act
+      TIO.putStrLn ""
+      TIO.putStrLn "Classification:"
+      showField "  Type" "activity_type" act
+      showField "  Urgency" "urgency" act
+      showField "  Autonomy Tier" "autonomy_tier" act
+      showField "  Confidence" "confidence" act
+      showArrayField "  Personas" "personas" act
+      TIO.putStrLn ""
+      showField "Created" "created_at" act
+      showField "Starts" "starts_at" act
+      showField "Ends" "ends_at" act
+    _ -> TIO.putStrLn "❌ Failed to fetch activity (not found or error)"
+
+-- Show a field from a JSON object
+showField :: Text -> Text -> KM.KeyMap Value -> IO ()
+showField label key obj = case KM.lookup (fromString $ unpack key) obj of
+  Just (String s) -> TIO.putStrLn $ label <> ": " <> s
+  Just (Number n) -> TIO.putStrLn $ label <> ": " <> showT n
+  Just Null -> return ()
+  Just v -> TIO.putStrLn $ label <> ": " <> pack (show v)
+  Nothing -> return ()
+
+-- Show an array field
+showArrayField :: Text -> Text -> KM.KeyMap Value -> IO ()
+showArrayField label key obj = case KM.lookup (fromString $ unpack key) obj of
+  Just (Array arr) | not (null arr) -> do
+    let items = [s | String s <- toList arr]
+    TIO.putStrLn $ label <> ": " <> pack (show items)
+  _ -> return ()
 
 runClassify :: IO ()
 runClassify = do
