@@ -29,6 +29,7 @@ instance FromJSON ActivitySource where
 
 data ActivityStatus
   = Pending
+  | NeedsReview
   | Quarantined
   | Processed
   | Surfaced
@@ -37,6 +38,7 @@ data ActivityStatus
 
 instance ToJSON ActivityStatus where
   toJSON Pending = "pending"
+  toJSON NeedsReview = "needs_review"
   toJSON Quarantined = "quarantined"
   toJSON Processed = "processed"
   toJSON Surfaced = "surfaced"
@@ -45,6 +47,7 @@ instance ToJSON ActivityStatus where
 instance FromJSON ActivityStatus where
   parseJSON = withText "ActivityStatus" $ \case
     "pending" -> pure Pending
+    "needs_review" -> pure NeedsReview
     "quarantined" -> pure Quarantined
     "processed" -> pure Processed
     "surfaced" -> pure Surfaced

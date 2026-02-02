@@ -42,7 +42,7 @@ determineStatus threshold classification
   | classificationConfidence classification < threshold = Act.Quarantined
   | classificationAutonomyTier classification == 1 = Act.Processed
   | classificationAutonomyTier classification == 2 = Act.Processed
-  | classificationAutonomyTier classification == 3 = Pending
+  | classificationAutonomyTier classification == 3 = Act.NeedsReview
   | classificationAutonomyTier classification >= 4 = Act.Surfaced
   | otherwise = Pending
 
@@ -66,6 +66,7 @@ buildActionDetail c status =
         Act.Quarantined -> "Low confidence, quarantined for review"
         Act.Processed -> "Processed automatically"
         Act.Surfaced -> "Surfaced for user attention"
-        Pending -> "Awaiting review"
+        Act.NeedsReview -> "Classified, needs review"
+        Pending -> "Awaiting classification"
         Archived -> "Archived"
   in tierDesc <> ". " <> statusDesc <> ". Summary: " <> classificationSummary c

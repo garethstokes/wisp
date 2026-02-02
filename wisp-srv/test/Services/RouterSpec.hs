@@ -20,9 +20,9 @@ spec = describe "Router" $ do
       let c = mkClassification 0.9 2
       determineStatus 0.5 c `shouldBe` Processed
 
-    it "keeps tier 3 pending for review" $ do
+    it "marks tier 3 as needs review" $ do
       let c = mkClassification 0.9 3
-      determineStatus 0.5 c `shouldBe` Pending
+      determineStatus 0.5 c `shouldBe` NeedsReview
 
     it "surfaces tier 4 items" $ do
       let c = mkClassification 0.9 4

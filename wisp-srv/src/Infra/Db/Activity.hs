@@ -56,6 +56,7 @@ instance FromRow Activity where
 
       parseStatus :: Text -> ActivityStatus
       parseStatus "pending" = Pending
+      parseStatus "needs_review" = NeedsReview
       parseStatus "quarantined" = Quarantined
       parseStatus "processed" = Processed
       parseStatus "surfaced" = Surfaced
@@ -191,6 +192,7 @@ getActivitiesByStatus status limit = do
   conn <- getConn
   let statusText = case status of
         Pending -> "pending" :: Text
+        NeedsReview -> "needs_review"
         Quarantined -> "quarantined"
         Processed -> "processed"
         Surfaced -> "surfaced"
@@ -209,6 +211,7 @@ countActivitiesByStatus status = do
   conn <- getConn
   let statusText = case status of
         Pending -> "pending" :: Text
+        NeedsReview -> "needs_review"
         Quarantined -> "quarantined"
         Processed -> "processed"
         Surfaced -> "surfaced"
@@ -226,6 +229,7 @@ updateActivityStatus aid status = do
   conn <- getConn
   let statusText = case status of
         Pending -> "pending" :: Text
+        NeedsReview -> "needs_review"
         Quarantined -> "quarantined"
         Processed -> "processed"
         Surfaced -> "surfaced"
