@@ -35,6 +35,7 @@ executable wisp-srv
         Domain.Classification
         Domain.Id
         Domain.Person
+        Domain.Receipt
         Domain.Schema
         Http.Handlers.Activities
         Http.Handlers.Auth
@@ -49,6 +50,7 @@ executable wisp-srv
         Infra.Db.Migrations
         Infra.Db.Person
         Infra.Db.PollState
+        Infra.Db.Receipt
         Infra.Google.Auth
         Infra.Google.Calendar
         Infra.Google.Gmail
@@ -104,6 +106,8 @@ test-suite wisp-srv-test
         Domain.IdSpec
         Domain.Person
         Domain.PersonSpec
+        Domain.Receipt
+        Domain.ReceiptSpec
         Domain.Schema
         Domain.SchemaSpec
         App.Config
@@ -131,6 +135,8 @@ test-suite wisp-srv-test
         Infra.Db.PersonSpec
         Infra.Db.PollState
         Infra.Db.PollStateSpec
+        Infra.Db.Receipt
+        Infra.Db.ReceiptSpec
         Infra.Google.Auth
         Infra.Google.AuthSpec
         Infra.Google.Calendar
