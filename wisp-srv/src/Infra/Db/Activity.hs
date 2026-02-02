@@ -2,6 +2,7 @@
 module Infra.Db.Activity
   ( insertActivity
   , activityExists
+  , activityExistsForAccount
   , getActivity
   , getActivitiesByStatus
   , updateActivityStatus
@@ -19,6 +20,7 @@ import App.Monad (App, getConn)
 instance FromRow Activity where
   fromRow = Activity
     <$> (EntityId <$> field)          -- id
+    <*> (EntityId <$> field)          -- account_id
     <*> (parseSource <$> field)       -- source
     <*> field                          -- source_id
     <*> field                          -- raw (jsonb)
@@ -53,10 +55,11 @@ insertActivity new = do
         Calendar -> "calendar"
   n <- liftIO $ execute conn
     "insert into activities \
-    \(id, source, source_id, raw, title, sender_email, starts_at, ends_at) \
-    \values (?, ?, ?, ?, ?, ?, ?, ?) \
-    \on conflict (source, source_id) do nothing"
+    \(id, account_id, source, source_id, raw, title, sender_email, starts_at, ends_at) \
+    \values (?, ?, ?, ?, ?, ?, ?, ?, ?) \
+    \on conflict (account_id, source, source_id) do nothing"
     ( unEntityId aid
+    , unEntityId (newActivityAccountId new)
     , srcText
     , newActivitySourceId new
     , newActivityRaw new
@@ -84,7 +87,7 @@ getActivity :: EntityId -> App (Maybe Activity)
 getActivity aid = do
   conn <- getConn
   results <- liftIO $ query conn
-    "select id, source, source_id, raw, status, title, summary, \
+    "select id, account_id, source, source_id, raw, status, title, summary, \
     \sender_email, starts_at, ends_at, created_at \
     \from activities where id = ?"
     (Only $ unEntityId aid)
@@ -103,7 +106,7 @@ getActivitiesByStatus status limit = do
         Surfaced -> "surfaced"
         Archived -> "archived"
   liftIO $ query conn
-    "select id, source, source_id, raw, status, title, summary, \
+    "select id, account_id, source, source_id, raw, status, title, summary, \
     \sender_email, starts_at, ends_at, created_at \
     \from activities where status = ? \
     \order by created_at desc limit ?"
@@ -123,3 +126,15 @@ updateActivityStatus aid status = do
     "update activities set status = ?, updated_at = now() where id = ?"
     (statusText, unEntityId aid)
   pure ()
+
+-- Check if activity exists for an account
+activityExistsForAccount :: EntityId -> ActivitySource -> Text -> App Bool
+activityExistsForAccount accountId src srcId = do
+  conn <- getConn
+  let srcText = case src of
+        Email -> "email" :: Text
+        Calendar -> "calendar"
+  results <- liftIO $ query conn
+    "select 1 from activities where account_id = ? and source = ? and source_id = ? limit 1"
+    (unEntityId accountId, srcText, srcId)
+  pure $ not (null (results :: [Only Int]))

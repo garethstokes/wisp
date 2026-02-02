@@ -52,6 +52,7 @@ instance FromJSON ActivityStatus where
 -- Full activity record from database
 data Activity = Activity
   { activityId :: EntityId
+  , activityAccountId :: EntityId
   , activitySource :: ActivitySource
   , activitySourceId :: Text
   , activityRaw :: Value
@@ -66,7 +67,8 @@ data Activity = Activity
 
 -- For creating new activities
 data NewActivity = NewActivity
-  { newActivitySource :: ActivitySource
+  { newActivityAccountId :: EntityId
+  , newActivitySource :: ActivitySource
   , newActivitySourceId :: Text
   , newActivityRaw :: Value
   , newActivityTitle :: Maybe Text
