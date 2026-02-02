@@ -9,6 +9,7 @@ module Infra.Db.Activity
   , getActivitiesForToday
   , getRecentActivities
   , getTodaysCalendarEvents
+  , getPendingEmails
   , updateActivityStatus
   , updateActivityClassification
   ) where
@@ -168,6 +169,20 @@ getTodaysCalendarEvents = do
     \  and starts_at < date_trunc('day', now()) + interval '1 day' \
     \order by starts_at"
     ()
+
+-- Get pending emails (for chat context)
+getPendingEmails :: Int -> App [Activity]
+getPendingEmails limit = do
+  conn <- getConn
+  liftIO $ query conn
+    "select id, account_id, source, source_id, raw, status, title, summary, \
+    \sender_email, starts_at, ends_at, created_at, \
+    \personas, activity_type, urgency, autonomy_tier, confidence, person_id \
+    \from activities \
+    \where source = 'email' and status = 'pending' \
+    \order by created_at desc \
+    \limit ?"
+    (Only limit)
 
 -- Get activities by status
 getActivitiesByStatus :: ActivityStatus -> Int -> App [Activity]

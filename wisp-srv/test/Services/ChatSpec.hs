@@ -12,6 +12,7 @@ spec = describe "Chat" $ do
       let ctx = ChatContext
             { contextCalendarEvents = []
             , contextRecentActivities = []
+            , contextPendingEmails = []
             , contextQuarantineCount = 0
             , contextSurfacedCount = 0
             , contextMentionedPeople = []
@@ -20,11 +21,13 @@ spec = describe "Chat" $ do
       prompt `shouldSatisfy` T.isInfixOf "Wisp"
       prompt `shouldSatisfy` T.isInfixOf "Never say"
       prompt `shouldSatisfy` T.isInfixOf "No events scheduled today"
+      prompt `shouldSatisfy` T.isInfixOf "No pending emails"
 
     it "includes context counts" $ do
       let ctx = ChatContext
             { contextCalendarEvents = []
             , contextRecentActivities = []
+            , contextPendingEmails = []
             , contextQuarantineCount = 5
             , contextSurfacedCount = 3
             , contextMentionedPeople = []

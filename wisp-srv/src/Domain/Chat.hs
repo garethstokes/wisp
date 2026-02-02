@@ -13,6 +13,7 @@ import Domain.Person (Person)
 data ChatContext = ChatContext
   { contextCalendarEvents :: [Activity]
   , contextRecentActivities :: [Activity]
+  , contextPendingEmails :: [Activity]
   , contextQuarantineCount :: Int
   , contextSurfacedCount :: Int
   , contextMentionedPeople :: [Person]

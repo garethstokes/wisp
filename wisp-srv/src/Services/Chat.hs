@@ -11,7 +11,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Domain.Activity (Activity(..), ActivityStatus(..))
 import Domain.Chat (ChatContext(..))
-import Infra.Db.Activity (getRecentActivities, getTodaysCalendarEvents, getActivitiesByStatus, insertConversation)
+import Infra.Db.Activity (getRecentActivities, getTodaysCalendarEvents, getActivitiesByStatus, getPendingEmails, insertConversation)
 import Infra.Claude.Client (callClaudeWithSystem)
 import App.Monad (App, Env(..))
 import App.Config (Config(..), ClaudeConfig(..))
@@ -21,11 +21,13 @@ assembleContext :: Text -> App ChatContext
 assembleContext _query = do
   calendar <- getTodaysCalendarEvents
   recent <- getRecentActivities 24
+  pendingEmails <- getPendingEmails 50
   quarantined <- getActivitiesByStatus Quarantined 100
   surfaced <- getActivitiesByStatus Surfaced 100
   pure ChatContext
     { contextCalendarEvents = calendar
     , contextRecentActivities = recent
+    , contextPendingEmails = pendingEmails
     , contextQuarantineCount = length quarantined
     , contextSurfacedCount = length surfaced
     , contextMentionedPeople = []
@@ -46,6 +48,9 @@ buildSystemPrompt ctx = T.unlines
   , "## Today's Calendar"
   , formatCalendar (contextCalendarEvents ctx)
   , ""
+  , "## Pending Emails (" <> T.pack (show (length (contextPendingEmails ctx))) <> " total)"
+  , formatEmails (contextPendingEmails ctx)
+  , ""
   , "## Context"
   , "- " <> T.pack (show (length (contextRecentActivities ctx))) <> " activities in last 24 hours"
   , "- " <> T.pack (show (contextQuarantineCount ctx)) <> " items in quarantine needing review"
@@ -58,6 +63,13 @@ formatCalendar events = T.unlines $ map formatEvent events
   where
     formatEvent a = "- " <> fromMaybe "(no title)" (activityTitle a)
       <> maybe "" (\t -> " at " <> T.pack (show t)) (activityStartsAt a)
+
+formatEmails :: [Activity] -> Text
+formatEmails [] = "No pending emails."
+formatEmails emails = T.unlines $ map formatEmail (take 20 emails)  -- Show top 20
+  where
+    formatEmail a = "- " <> fromMaybe "(no subject)" (activityTitle a)
+      <> maybe "" (\s -> " from " <> s) (activitySenderEmail a)
 
 -- Process a chat message
 processChat :: Text -> App (Either Text Text)
