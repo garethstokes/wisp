@@ -27,6 +27,10 @@ testConfig = Config
   , classification = ClassificationConfig
       { confidenceThreshold = 0.5
       }
+  , claude = ClaudeConfig
+      { apiKey = "test-api-key"
+      , model = "claude-3-5-haiku-latest"
+      }
   }
 
 -- Run an action with a test environment, rolling back after

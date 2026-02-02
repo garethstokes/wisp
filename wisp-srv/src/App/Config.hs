@@ -32,9 +32,12 @@ instance FromJSON DatabaseConfig
 data GoogleConfig = GoogleConfig
   { clientId :: Text
   , clientSecret :: Text
-  } deriving (Generic, Show)
+  } deriving (Generic)
 
 instance FromJSON GoogleConfig
+
+instance Show GoogleConfig where
+  show c = "GoogleConfig {clientId = " <> show (clientId c) <> ", clientSecret = \"<redacted>\"}"
 
 data PollingConfig = PollingConfig
   { intervalMinutes :: Int
@@ -51,9 +54,12 @@ instance FromJSON ClassificationConfig
 data ClaudeConfig = ClaudeConfig
   { apiKey :: Text
   , model :: Text
-  } deriving (Generic, Show)
+  } deriving (Generic)
 
 instance FromJSON ClaudeConfig
+
+instance Show ClaudeConfig where
+  show c = "ClaudeConfig {apiKey = \"<redacted>\", model = " <> show (model c) <> "}"
 
 data Config = Config
   { server :: ServerConfig
