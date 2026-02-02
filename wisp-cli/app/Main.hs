@@ -7,6 +7,7 @@ import Data.Aeson (Value(..), decode, encode, object, (.=))
 import Data.Foldable (toList)
 import Data.String (fromString)
 import Data.Text (Text, pack, unpack)
+import qualified Data.Text as T
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.Text.IO as TIO
 import Network.HTTP.Client
@@ -161,8 +162,34 @@ showActivityBrief prefix (Object act) = do
         Just (String "email") -> "📧"
         Just (String "calendar") -> "📅"
         _ -> "📝"
-  TIO.putStrLn $ prefix <> getSource <> " " <> getUrgency <> " [" <> getId <> "] " <> getTitle
+  -- Get date from starts_at (for calendar) or created_at (for email)
+  let getDate = case KM.lookup "starts_at" act of
+        Just (String s) -> formatDate s
+        _ -> case KM.lookup "created_at" act of
+          Just (String s) -> formatDate s
+          _ -> ""
+  let datePart = if getDate == "" then "" else getDate <> " "
+  TIO.putStrLn $ prefix <> getSource <> " " <> getUrgency <> " " <> datePart <> "[" <> getId <> "] " <> getTitle
 showActivityBrief _ _ = return ()
+
+-- Format ISO date to short form (e.g., "Jan 30" or "Feb 3 14:00")
+formatDate :: Text -> Text
+formatDate isoDate =
+  let dateStr = T.takeWhile (/= '.') isoDate  -- Remove milliseconds
+      -- Extract date and time parts
+      datePart = T.take 10 dateStr  -- "2026-01-30"
+      timePart = T.drop 11 dateStr  -- "14:00:00" or empty
+      -- Parse month and day
+      month = case T.take 2 (T.drop 5 datePart) of
+        "01" -> "Jan"; "02" -> "Feb"; "03" -> "Mar"; "04" -> "Apr"
+        "05" -> "May"; "06" -> "Jun"; "07" -> "Jul"; "08" -> "Aug"
+        "09" -> "Sep"; "10" -> "Oct"; "11" -> "Nov"; "12" -> "Dec"
+        _ -> "???"
+      day = T.dropWhile (== '0') $ T.drop 8 datePart
+      time = T.take 5 timePart  -- "14:00"
+  in if T.null timePart || time == "00:00"
+     then month <> " " <> day
+     else month <> " " <> day <> " " <> time
 
 runApprove :: Text -> IO ()
 runApprove aid = do
