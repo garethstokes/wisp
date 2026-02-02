@@ -18,6 +18,7 @@ data Command
   | Status
   | Poll
   | Classify
+  | Today
   | Help
   deriving (Show)
 
@@ -28,6 +29,7 @@ commandParser = subparser
   <> command "status" (info (pure Status) (progDesc "Quick status overview"))
   <> command "poll" (info (pure Poll) (progDesc "Trigger a poll cycle"))
   <> command "classify" (info (pure Classify) (progDesc "Run classification pipeline"))
+  <> command "today" (info (pure Today) (progDesc "Show activities requiring attention"))
   <> command "help" (info (pure Help) (progDesc "Show help"))
   )
 
@@ -50,6 +52,7 @@ main = do
     Status -> runStatus
     Poll -> runPoll
     Classify -> runClassify
+    Today -> runToday
     Help -> runHelp
 
 runHelp :: IO ()
@@ -61,9 +64,65 @@ runHelp = do
   TIO.putStrLn "  status    Show server and auth status"
   TIO.putStrLn "  poll      Trigger a poll cycle"
   TIO.putStrLn "  classify  Run classification pipeline"
+  TIO.putStrLn "  today     Show activities requiring attention"
   TIO.putStrLn "  help      Show this help"
   TIO.putStrLn ""
   TIO.putStrLn "Use --help for more details"
+
+runToday :: IO ()
+runToday = do
+  manager <- newManager defaultManagerSettings
+  req <- parseRequest $ baseUrl <> "/today"
+  response <- httpLbs req manager
+  case decode (responseBody response) of
+    Just (Object obj) -> do
+      -- Show quarantined items first (need decision)
+      case KM.lookup "quarantined" obj of
+        Just (Array items) | not (null items) -> do
+          TIO.putStrLn "⚠️  Quarantined (needs review):"
+          mapM_ (showActivityBrief "  ") (toList items)
+          TIO.putStrLn ""
+        _ -> return ()
+      -- Show surfaced items (ready to act)
+      case KM.lookup "surfaced" obj of
+        Just (Array items) | not (null items) -> do
+          TIO.putStrLn "📋 Ready for action:"
+          mapM_ (showActivityBrief "  ") (toList items)
+          TIO.putStrLn ""
+        _ -> return ()
+      -- Show high urgency pending
+      case KM.lookup "high_urgency" obj of
+        Just (Array items) | not (null items) -> do
+          TIO.putStrLn "🔥 High urgency (pending classification):"
+          mapM_ (showActivityBrief "  ") (toList items)
+          TIO.putStrLn ""
+        _ -> return ()
+      -- Show total
+      case KM.lookup "total" obj of
+        Just (Number n) | n == 0 -> TIO.putStrLn "No activities requiring attention."
+        _ -> return ()
+    _ -> TIO.putStrLn "Failed to fetch today's activities"
+
+-- Show a brief activity line
+showActivityBrief :: Text -> Value -> IO ()
+showActivityBrief prefix (Object act) = do
+  let getId = case KM.lookup "id" act of
+        Just (String s) -> s
+        _ -> "?"
+  let getTitle = case KM.lookup "title" act of
+        Just (String s) -> s
+        _ -> "(no title)"
+  let getUrgency = case KM.lookup "urgency" act of
+        Just (String "high") -> "🔴"
+        Just (String "normal") -> "🟡"
+        Just (String "low") -> "🟢"
+        _ -> "⚪"
+  let getSource = case KM.lookup "source" act of
+        Just (String "email") -> "📧"
+        Just (String "calendar") -> "📅"
+        _ -> "📝"
+  TIO.putStrLn $ prefix <> getSource <> " " <> getUrgency <> " [" <> getId <> "] " <> getTitle
+showActivityBrief _ _ = return ()
 
 runClassify :: IO ()
 runClassify = do
