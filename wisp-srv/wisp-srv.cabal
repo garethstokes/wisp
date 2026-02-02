@@ -60,6 +60,7 @@ executable wisp-srv
         Services.Classifier
         Services.GmailPoller
         Services.PeopleResolver
+        Services.Router
         Services.Scheduler
     build-depends:
         base >=4.17 && <5,
@@ -158,6 +159,8 @@ test-suite wisp-srv-test
         Services.GmailPollerSpec
         Services.PeopleResolver
         Services.PeopleResolverSpec
+        Services.Router
+        Services.RouterSpec
         Services.Scheduler
         TestEnv
     build-tool-depends:
