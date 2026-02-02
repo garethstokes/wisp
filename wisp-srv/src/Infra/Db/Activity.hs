@@ -6,6 +6,7 @@ module Infra.Db.Activity
   , getActivity
   , getActivitiesByStatus
   , updateActivityStatus
+  , updateActivityClassification
   ) where
 
 import Control.Monad.IO.Class (liftIO)
@@ -13,8 +14,10 @@ import Data.Aeson ()
 import Data.Text (Text)
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.FromRow
+import Database.PostgreSQL.Simple.Types (PGArray(..))
 import Domain.Id (EntityId(..), newEntityId)
 import Domain.Activity
+import Domain.Classification (Classification(..), ActivityType(..), Urgency(..))
 import App.Monad (App, getConn)
 
 instance FromRow Activity where
@@ -31,6 +34,12 @@ instance FromRow Activity where
     <*> field                          -- starts_at
     <*> field                          -- ends_at
     <*> field                          -- created_at
+    <*> (fmap fromPGArray <$> field)  -- personas
+    <*> field                          -- activity_type
+    <*> field                          -- urgency
+    <*> field                          -- autonomy_tier
+    <*> field                          -- confidence
+    <*> (fmap EntityId <$> field)     -- person_id
     where
       parseSource :: Text -> ActivitySource
       parseSource "email" = Email
@@ -88,7 +97,8 @@ getActivity aid = do
   conn <- getConn
   results <- liftIO $ query conn
     "select id, account_id, source, source_id, raw, status, title, summary, \
-    \sender_email, starts_at, ends_at, created_at \
+    \sender_email, starts_at, ends_at, created_at, \
+    \personas, activity_type, urgency, autonomy_tier, confidence, person_id \
     \from activities where id = ?"
     (Only $ unEntityId aid)
   pure $ case results of
@@ -107,7 +117,8 @@ getActivitiesByStatus status limit = do
         Archived -> "archived"
   liftIO $ query conn
     "select id, account_id, source, source_id, raw, status, title, summary, \
-    \sender_email, starts_at, ends_at, created_at \
+    \sender_email, starts_at, ends_at, created_at, \
+    \personas, activity_type, urgency, autonomy_tier, confidence, person_id \
     \from activities where status = ? \
     \order by created_at desc limit ?"
     (statusText, limit)
@@ -138,3 +149,34 @@ activityExistsForAccount accountId src srcId = do
     "select 1 from activities where account_id = ? and source = ? and source_id = ? limit 1"
     (unEntityId accountId, srcText, srcId)
   pure $ not (null (results :: [Only Int]))
+
+-- Update activity with classification data
+updateActivityClassification :: EntityId -> Classification -> Maybe EntityId -> App ()
+updateActivityClassification aid classification mPersonId = do
+  conn <- getConn
+  let typeText = case classificationActivityType classification of
+        Request -> "request" :: Text
+        Information -> "information"
+        ActionRequired -> "action_required"
+        FYI -> "fyi"
+        Event -> "event"
+  let urgencyText = case classificationUrgency classification of
+        High -> "high" :: Text
+        Normal -> "normal"
+        Low -> "low"
+  _ <- liftIO $ execute conn
+    "update activities set \
+    \  personas = ?, activity_type = ?, urgency = ?, \
+    \  autonomy_tier = ?, confidence = ?, summary = ?, \
+    \  person_id = ?, updated_at = now() \
+    \where id = ?"
+    ( PGArray (classificationPersonas classification)
+    , typeText
+    , urgencyText
+    , classificationAutonomyTier classification
+    , classificationConfidence classification
+    , classificationSummary classification
+    , fmap unEntityId mPersonId
+    , unEntityId aid
+    )
+  pure ()

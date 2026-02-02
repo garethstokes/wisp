@@ -63,6 +63,13 @@ data Activity = Activity
   , activityStartsAt :: Maybe UTCTime
   , activityEndsAt :: Maybe UTCTime
   , activityCreatedAt :: UTCTime
+  -- Classification fields (populated by classifier):
+  , activityPersonas :: Maybe [Text]
+  , activityType :: Maybe Text
+  , activityUrgency :: Maybe Text
+  , activityAutonomyTier :: Maybe Int
+  , activityConfidence :: Maybe Double
+  , activityPersonId :: Maybe EntityId
   } deriving (Show)
 
 -- For creating new activities
