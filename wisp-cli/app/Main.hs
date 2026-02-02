@@ -17,6 +17,7 @@ data Command
   = Auth
   | Status
   | Poll
+  | Classify
   | Help
   deriving (Show)
 
@@ -26,6 +27,7 @@ commandParser = subparser
   ( command "auth" (info (pure Auth) (progDesc "Start OAuth flow"))
   <> command "status" (info (pure Status) (progDesc "Quick status overview"))
   <> command "poll" (info (pure Poll) (progDesc "Trigger a poll cycle"))
+  <> command "classify" (info (pure Classify) (progDesc "Run classification pipeline"))
   <> command "help" (info (pure Help) (progDesc "Show help"))
   )
 
@@ -47,6 +49,7 @@ main = do
     Auth -> runAuth
     Status -> runStatus
     Poll -> runPoll
+    Classify -> runClassify
     Help -> runHelp
 
 runHelp :: IO ()
@@ -54,12 +57,33 @@ runHelp = do
   TIO.putStrLn "wisp - your autonomy-preserving assistant"
   TIO.putStrLn ""
   TIO.putStrLn "Commands:"
-  TIO.putStrLn "  auth    Start OAuth flow with Google"
-  TIO.putStrLn "  status  Show server and auth status"
-  TIO.putStrLn "  poll    Trigger a poll cycle"
-  TIO.putStrLn "  help    Show this help"
+  TIO.putStrLn "  auth      Start OAuth flow with Google"
+  TIO.putStrLn "  status    Show server and auth status"
+  TIO.putStrLn "  poll      Trigger a poll cycle"
+  TIO.putStrLn "  classify  Run classification pipeline"
+  TIO.putStrLn "  help      Show this help"
   TIO.putStrLn ""
   TIO.putStrLn "Use --help for more details"
+
+runClassify :: IO ()
+runClassify = do
+  TIO.putStrLn "Running classification pipeline..."
+  manager <- newManager defaultManagerSettings
+  initialReq <- parseRequest $ baseUrl <> "/pipeline/run"
+  let req = initialReq { method = "POST" }
+  response <- httpLbs req manager
+  case decode (responseBody response) of
+    Just (Object obj) -> do
+      let getNum key = case KM.lookup key obj of
+            Just (Number n) -> round n :: Int
+            _ -> 0
+      let processed = getNum "processed"
+      let failed = getNum "failed"
+      let total = getNum "total"
+      TIO.putStrLn $ "Processed: " <> showT processed <> " activities"
+      TIO.putStrLn $ "Failed:    " <> showT failed <> " activities"
+      TIO.putStrLn $ "Total:     " <> showT total <> " activities"
+    _ -> TIO.putStrLn "Classification request sent"
 
 runPoll :: IO ()
 runPoll = do
