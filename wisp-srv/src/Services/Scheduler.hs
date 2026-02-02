@@ -15,6 +15,7 @@ import App.Config (Config(..), PollingConfig(..))
 import App.Monad (App, Env(..), runApp, getConfig, getLogger)
 import Services.GmailPoller (pollAllGmail)
 import Services.CalendarPoller (pollAllCalendar)
+import Services.Pipeline (processPendingActivities)
 
 -- Helper to log within App monad
 logInfo :: T.Text -> App ()
@@ -46,6 +47,16 @@ runPollCycle = do
       logInfo $ "Calendar: imported " <> T.pack (show totalEvents) <> " events total"
       -- Log per-account results
       mapM_ logAccountResult $ map (\(e, r) -> ("Calendar", e, r)) calResults
+
+  -- Run classification pipeline on pending activities
+  pipelineResults <- processPendingActivities 10
+  case pipelineResults of
+    [] -> pure ()  -- No pending activities to process
+    _ -> do
+      let totalProcessed = length [()|  (_, Right _) <- pipelineResults]
+      let totalFailed = length [()|  (_, Left _) <- pipelineResults]
+      logInfo $ "Pipeline: processed " <> T.pack (show totalProcessed)
+             <> ", failed " <> T.pack (show totalFailed)
 
   logInfo "Poll cycle complete"
 
