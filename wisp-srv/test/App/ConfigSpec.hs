@@ -21,6 +21,9 @@ spec = describe "Config" $ do
           , "  intervalMinutes: 5"
           , "classification:"
           , "  confidenceThreshold: 0.5"
+          , "claude:"
+          , "  apiKey: test-api-key"
+          , "  model: claude-sonnet-4-20250514"
           ]
     case decodeEither' yaml of
       Left err -> expectationFailure $ show err

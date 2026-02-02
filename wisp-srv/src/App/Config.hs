@@ -5,6 +5,7 @@ module App.Config
   , GoogleConfig(..)
   , PollingConfig(..)
   , ClassificationConfig(..)
+  , ClaudeConfig(..)
   , loadConfig
   ) where
 
@@ -47,12 +48,20 @@ data ClassificationConfig = ClassificationConfig
 
 instance FromJSON ClassificationConfig
 
+data ClaudeConfig = ClaudeConfig
+  { apiKey :: Text
+  , model :: Text
+  } deriving (Generic, Show)
+
+instance FromJSON ClaudeConfig
+
 data Config = Config
   { server :: ServerConfig
   , database :: DatabaseConfig
   , google :: GoogleConfig
   , polling :: PollingConfig
   , classification :: ClassificationConfig
+  , claude :: ClaudeConfig
   } deriving (Generic, Show)
 
 instance FromJSON Config
@@ -67,6 +76,7 @@ loadConfig path = do
       mPort <- lookupEnv "PORT"
       mGoogleClientId <- lookupEnv "GOOGLE_CLIENT_ID"
       mGoogleClientSecret <- lookupEnv "GOOGLE_CLIENT_SECRET"
+      mAnthropicApiKey <- lookupEnv "ANTHROPIC_API_KEY"
       pure cfg
         { database = cfg.database
             { url = maybe cfg.database.url T.pack mDbUrl
@@ -77,5 +87,8 @@ loadConfig path = do
         , google = cfg.google
             { clientId = maybe cfg.google.clientId T.pack mGoogleClientId
             , clientSecret = maybe cfg.google.clientSecret T.pack mGoogleClientSecret
+            }
+        , claude = cfg.claude
+            { apiKey = maybe cfg.claude.apiKey T.pack mAnthropicApiKey
             }
         }

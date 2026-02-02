@@ -1,6 +1,6 @@
 # Wisp configuration
 # Values can be overridden by environment variables:
-#   DATABASE_URL, PORT, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
+#   DATABASE_URL, PORT, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, ANTHROPIC_API_KEY
 
 server:
   host: "127.0.0.1"
@@ -19,3 +19,8 @@ polling:
 
 classification:
   confidenceThreshold: 0.5
+
+claude:
+  # Override with ANTHROPIC_API_KEY environment variable
+  apiKey: "set-via-env"
+  model: "claude-sonnet-4-20250514"
