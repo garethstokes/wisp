@@ -2,6 +2,7 @@
 module Http.Handlers.Activities
   ( getActivities
   , getActivityById
+  , getToday
   , triggerPoll
   ) where
 
@@ -14,10 +15,10 @@ import Web.Scotty.Trans (ActionT, json, status, pathParam)
 import App.Monad (Env)
 import Domain.Id (EntityId(..))
 import Domain.Activity (Activity(..), ActivityStatus(..))
-import Infra.Db.Activity (getActivitiesByStatus, getActivity)
+import Infra.Db.Activity (getActivitiesByStatus, getActivity, getActivitiesForToday)
 import Services.Scheduler (runPollCycle)
 
--- Convert Activity to JSON
+-- Convert Activity to JSON (full details including classification)
 activityToJson :: Activity -> Value
 activityToJson a = object
   [ "id" .= unEntityId (activityId a)
@@ -31,6 +32,12 @@ activityToJson a = object
   , "starts_at" .= activityStartsAt a
   , "ends_at" .= activityEndsAt a
   , "created_at" .= activityCreatedAt a
+  , "personas" .= activityPersonas a
+  , "activity_type" .= activityType a
+  , "urgency" .= activityUrgency a
+  , "autonomy_tier" .= activityAutonomyTier a
+  , "confidence" .= activityConfidence a
+  , "person_id" .= fmap unEntityId (activityPersonId a)
   ]
 
 -- GET /activities
@@ -53,6 +60,21 @@ getActivityById = do
       status status404
       json $ object ["error" .= ("Activity not found" :: Text)]
     Just activity -> json $ activityToJson activity
+
+-- GET /today - Activities requiring attention today
+getToday :: ActionT (ReaderT Env IO) ()
+getToday = do
+  activities <- lift $ getActivitiesForToday 50
+  -- Group by status for the CLI
+  let surfaced = [a | a <- activities, activityStatus a == Surfaced]
+  let quarantined = [a | a <- activities, activityStatus a == Quarantined]
+  let highUrgency = [a | a <- activities, activityStatus a == Pending]
+  json $ object
+    [ "surfaced" .= map activityToJson surfaced
+    , "quarantined" .= map activityToJson quarantined
+    , "high_urgency" .= map activityToJson highUrgency
+    , "total" .= length activities
+    ]
 
 -- POST /poll
 triggerPoll :: ActionT (ReaderT Env IO) ()
