@@ -57,6 +57,7 @@ executable wisp-srv
         Infra.Google.Gmail
         Infra.Google.TokenManager
         Services.CalendarPoller
+        Services.Classifier
         Services.GmailPoller
         Services.Scheduler
     build-depends:
@@ -150,6 +151,8 @@ test-suite wisp-srv-test
         Infra.Google.TokenManagerSpec
         Services.CalendarPoller
         Services.CalendarPollerSpec
+        Services.Classifier
+        Services.ClassifierSpec
         Services.GmailPoller
         Services.GmailPollerSpec
         Services.Scheduler
