@@ -1,6 +1,7 @@
 -- src/Infra/Db/Activity.hs
 module Infra.Db.Activity
   ( insertActivity
+  , insertConversation
   , activityExists
   , activityExistsForAccount
   , getActivity
@@ -15,6 +16,7 @@ module Infra.Db.Activity
 import Control.Monad.IO.Class (liftIO)
 import Data.Aeson ()
 import Data.Text (Text)
+import qualified Data.Text as T
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.FromRow
 import Database.PostgreSQL.Simple.Types (PGArray(..))
@@ -47,6 +49,7 @@ instance FromRow Activity where
       parseSource :: Text -> ActivitySource
       parseSource "email" = Email
       parseSource "calendar" = Calendar
+      parseSource "conversation" = Conversation
       parseSource _ = Email  -- default
 
       parseStatus :: Text -> ActivityStatus
@@ -65,6 +68,7 @@ insertActivity new = do
   let srcText = case newActivitySource new of
         Email -> "email" :: Text
         Calendar -> "calendar"
+        Conversation -> "conversation"
   n <- liftIO $ execute conn
     "insert into activities \
     \(id, account_id, source, source_id, raw, title, sender_email, starts_at, ends_at) \
@@ -89,6 +93,7 @@ activityExists src srcId = do
   let srcText = case src of
         Email -> "email" :: Text
         Calendar -> "calendar"
+        Conversation -> "conversation"
   results <- liftIO $ query conn
     "select 1 from activities where source = ? and source_id = ? limit 1"
     (srcText, srcId)
@@ -204,6 +209,7 @@ activityExistsForAccount accountId src srcId = do
   let srcText = case src of
         Email -> "email" :: Text
         Calendar -> "calendar"
+        Conversation -> "conversation"
   results <- liftIO $ query conn
     "select 1 from activities where account_id = ? and source = ? and source_id = ? limit 1"
     (unEntityId accountId, srcText, srcId)
@@ -239,3 +245,19 @@ updateActivityClassification aid classification mPersonId = do
     , unEntityId aid
     )
   pure ()
+
+-- Insert a conversation log
+insertConversation :: Text -> Text -> App EntityId
+insertConversation chatQuery response = do
+  conn <- getConn
+  aid <- liftIO newEntityId
+  _ <- liftIO $ execute conn
+    "insert into activities \
+    \(id, account_id, source, source_id, raw, title, summary, status) \
+    \values (?, (select id from accounts limit 1), 'conversation', ?, '{}', ?, ?, 'processed')"
+    ( unEntityId aid
+    , "chat-" <> unEntityId aid
+    , "Chat: " <> T.take 50 chatQuery
+    , response
+    )
+  pure aid

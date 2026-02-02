@@ -11,7 +11,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Domain.Activity (Activity(..), ActivityStatus(..))
 import Domain.Chat (ChatContext(..))
-import Infra.Db.Activity (getRecentActivities, getTodaysCalendarEvents, getActivitiesByStatus)
+import Infra.Db.Activity (getRecentActivities, getTodaysCalendarEvents, getActivitiesByStatus, insertConversation)
 import Infra.Claude.Client (callClaudeWithSystem)
 import App.Monad (App, Env(..))
 import App.Config (Config(..), ClaudeConfig(..))
@@ -70,4 +70,9 @@ processChat query = do
     (model claudeCfg)
     systemPrompt
     query
-  pure result
+  -- Log the conversation
+  case result of
+    Right response -> do
+      _ <- insertConversation query response
+      pure $ Right response
+    Left err -> pure $ Left err

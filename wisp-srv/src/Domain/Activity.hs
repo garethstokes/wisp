@@ -12,17 +12,19 @@ import Data.Time (UTCTime)
 import Domain.Id (EntityId)
 import GHC.Generics (Generic)
 
-data ActivitySource = Email | Calendar
+data ActivitySource = Email | Calendar | Conversation
   deriving (Eq, Show, Generic)
 
 instance ToJSON ActivitySource where
   toJSON Email = "email"
   toJSON Calendar = "calendar"
+  toJSON Conversation = "conversation"
 
 instance FromJSON ActivitySource where
   parseJSON = withText "ActivitySource" $ \case
     "email" -> pure Email
     "calendar" -> pure Calendar
+    "conversation" -> pure Conversation
     _ -> fail "Invalid activity source"
 
 data ActivityStatus
