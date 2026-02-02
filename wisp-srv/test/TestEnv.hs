@@ -7,6 +7,7 @@ import Database.PostgreSQL.Simple
 import System.Log.FastLogger (newStdoutLoggerSet, defaultBufSize)
 import App.Config
 import App.Monad
+import Services.ClassificationQueue (newClassificationQueue)
 
 testConfig :: Config
 testConfig = Config
@@ -26,6 +27,7 @@ testConfig = Config
       }
   , classification = ClassificationConfig
       { confidenceThreshold = 0.5
+      , workerCount = Just 1  -- Use 1 worker for tests
       }
   , claude = ClaudeConfig
       { apiKey = "test-api-key"
@@ -39,10 +41,12 @@ withTestEnv action = do
   conn <- connectPostgreSQL "postgres://localhost/wisp_test"
   _ <- execute_ conn "begin"
   lgr <- newStdoutLoggerSet defaultBufSize
+  cq <- newClassificationQueue
   let env = Env
         { config = testConfig
         , dbConn = conn
         , logger = lgr
+        , classificationQueue = cq
         }
   result <- action env
   _ <- execute_ conn "rollback"

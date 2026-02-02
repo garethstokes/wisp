@@ -5,17 +5,20 @@ module App.Monad
   , getConfig
   , getConn
   , getLogger
+  , getClassificationQueue
   ) where
 
 import Control.Monad.Reader (ReaderT, runReaderT, asks)
 import Database.PostgreSQL.Simple (Connection)
 import System.Log.FastLogger (LoggerSet)
 import App.Config (Config)
+import Services.ClassificationQueue (ClassificationQueue)
 
 data Env = Env
   { config :: Config
   , dbConn :: Connection
   , logger :: LoggerSet
+  , classificationQueue :: ClassificationQueue
   }
 
 type App a = ReaderT Env IO a
@@ -31,3 +34,6 @@ getConn = asks (.dbConn)
 
 getLogger :: App LoggerSet
 getLogger = asks (.logger)
+
+getClassificationQueue :: App ClassificationQueue
+getClassificationQueue = asks (.classificationQueue)

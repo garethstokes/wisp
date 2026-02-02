@@ -47,6 +47,7 @@ instance FromJSON PollingConfig
 
 data ClassificationConfig = ClassificationConfig
   { confidenceThreshold :: Double
+  , workerCount :: Maybe Int  -- Number of classification workers (Nothing = auto-detect CPU count)
   } deriving (Generic, Show)
 
 instance FromJSON ClassificationConfig

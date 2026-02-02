@@ -68,6 +68,7 @@ executable wisp-srv
         Services.Router
         Services.Scheduler
         Services.Chat
+        Services.ClassificationQueue
     build-depends:
         base >=4.17 && <5,
         text,
@@ -88,6 +89,7 @@ executable wisp-srv
         directory,
         filepath,
         async,
+        stm,
         neat-interpolation
 
 test-suite wisp-srv-test
@@ -177,6 +179,8 @@ test-suite wisp-srv-test
         Services.Scheduler
         Services.Chat
         Services.ChatSpec
+        Services.ClassificationQueue
+        Services.ClassificationQueueSpec
         TestEnv
     build-tool-depends:
         hspec-discover:hspec-discover
@@ -201,4 +205,5 @@ test-suite wisp-srv-test
         http-types,
         hspec,
         async,
+        stm,
         neat-interpolation
