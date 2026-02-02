@@ -1,6 +1,7 @@
--- src/Services/GmailPoller.hs
 module Services.GmailPoller
   ( pollGmail
+  , pollGmailForAccount
+  , pollAllGmail
   , extractEmailInfo
   ) where
 
@@ -12,9 +13,11 @@ import Data.Text (Text)
 import qualified Data.Text as T
 
 import App.Monad (App)
+import Domain.Id (EntityId)
+import Domain.Account (Account(..))
 import Domain.Activity (NewActivity(..), ActivitySource(..))
-import Infra.Db.Activity (insertActivity)
-import Infra.Db.PollState (getPollState, updatePollState, PollState(..))
+import Infra.Db.Activity (insertActivity, activityExistsForAccount)
+import Infra.Db.PollState (getPollStateForAccount, updatePollStateForAccount, ensurePollStateExists, PollState(..))
 import Infra.Google.Gmail
   ( GmailMessage(..)
   , GmailMessageList(..)
@@ -28,68 +31,76 @@ import Infra.Google.Gmail
   , getMessage
   , listHistory
   )
-import Infra.Google.TokenManager (getValidToken, TokenError(..))
+import Infra.Google.TokenManager (getValidTokenForAccount, getAllValidTokens, TokenError(..))
 
--- | Poll Gmail for new messages and import them as activities.
--- Returns the count of successfully imported messages.
-pollGmail :: App (Either Text Int)
-pollGmail = do
-  tokenResult <- getValidToken
+-- | Poll Gmail for ALL accounts
+pollAllGmail :: App [(Text, Either Text Int)]
+pollAllGmail = do
+  tokensWithAccounts <- getAllValidTokens
+  forM tokensWithAccounts $ \(acc, tokenResult) -> do
+    result <- case tokenResult of
+      Left NoToken -> pure $ Left "No token"
+      Left (RefreshFailed err) -> pure $ Left $ "Token refresh failed: " <> err
+      Right token -> pollGmailWithToken (accountId acc) token
+    pure (accountEmail acc, result)
+
+-- | Poll Gmail for a specific account
+pollGmailForAccount :: Account -> App (Either Text Int)
+pollGmailForAccount acc = do
+  tokenResult <- getValidTokenForAccount (accountId acc)
   case tokenResult of
     Left NoToken -> pure $ Left "No Google token available"
     Left (RefreshFailed err) -> pure $ Left $ "Token refresh failed: " <> err
-    Right accessToken -> do
-      mPollState <- getPollState "gmail"
-      case mPollState of
-        Nothing -> initialPoll accessToken
-        Just ps -> incrementalPoll accessToken ps
+    Right accessToken -> pollGmailWithToken (accountId acc) accessToken
+
+-- | Poll Gmail with a specific token for an account
+pollGmailWithToken :: EntityId -> Text -> App (Either Text Int)
+pollGmailWithToken accId accessToken = do
+  -- Ensure poll state exists for this account
+  ensurePollStateExists accId "gmail"
+  mPollState <- getPollStateForAccount accId "gmail"
+  case mPollState of
+    Nothing -> initialPoll accId accessToken
+    Just ps -> case pollCursor ps of
+      Nothing -> initialPoll accId accessToken
+      Just cursor -> incrementalPoll accId accessToken cursor
 
 -- | Initial poll: fetch recent messages when no cursor exists
-initialPoll :: Text -> App (Either Text Int)
-initialPoll accessToken = do
+initialPoll :: EntityId -> Text -> App (Either Text Int)
+initialPoll accId accessToken = do
   result <- liftIO $ listMessages accessToken Nothing
   case result of
     Left err -> pure $ Left err
     Right msgList -> do
       let refs = fromMaybe [] (messages msgList)
-      count <- processMessageRefs accessToken refs
-      -- Store the first message ID as cursor for future incremental polls
-      -- Gmail's historyId from any message can be used as startHistoryId
+      count <- processMessageRefs accId accessToken refs
       case refs of
         [] -> pure $ Right 0
         (firstRef:_) -> do
-          -- Get the first message to extract its historyId for future polls
           firstMsgResult <- liftIO $ getMessage accessToken (refId firstRef)
           case firstMsgResult of
             Left _ -> do
-              -- If we can't get historyId, just store the message ID
-              updatePollState "gmail" (Just $ refId firstRef)
+              updatePollStateForAccount accId "gmail" (Just $ refId firstRef)
               pure $ Right count
             Right firstMsg -> do
-              -- Use historyId from the message for proper incremental sync
-              updatePollState "gmail" (gmailHistoryId firstMsg)
+              updatePollStateForAccount accId "gmail" (gmailHistoryId firstMsg)
               pure $ Right count
 
 -- | Incremental poll: use history API to get new messages since last cursor
-incrementalPoll :: Text -> PollState -> App (Either Text Int)
-incrementalPoll accessToken ps = do
-  case pollCursor ps of
-    Nothing -> initialPoll accessToken
-    Just cursor -> do
-      result <- liftIO $ listHistory accessToken cursor Nothing
-      case result of
-        Left err ->
-          -- History ID may have expired, fall back to initial poll
-          if "404" `T.isInfixOf` err || "historyId" `T.isInfixOf` err
-            then initialPoll accessToken
-            else pure $ Left err
-        Right histList -> do
-          let refs = extractRefsFromHistory histList
-          count <- processMessageRefs accessToken refs
-          -- Update cursor to new historyId if available
-          let newCursor = historyId histList
-          updatePollState "gmail" newCursor
-          pure $ Right count
+incrementalPoll :: EntityId -> Text -> Text -> App (Either Text Int)
+incrementalPoll accId accessToken cursor = do
+  result <- liftIO $ listHistory accessToken cursor Nothing
+  case result of
+    Left err ->
+      if "404" `T.isInfixOf` err || "historyId" `T.isInfixOf` err
+        then initialPoll accId accessToken
+        else pure $ Left err
+    Right histList -> do
+      let refs = extractRefsFromHistory histList
+      count <- processMessageRefs accId accessToken refs
+      let newCursor = historyId histList
+      updatePollStateForAccount accId "gmail" newCursor
+      pure $ Right count
 
 -- | Extract message refs from history records
 extractRefsFromHistory :: GmailHistoryList -> [GmailMessageRef]
@@ -102,27 +113,33 @@ extractRefsFromHistory histList =
   in concatMap extractFromHistory histories
 
 -- | Process a list of message refs: fetch full message and insert as activity
-processMessageRefs :: Text -> [GmailMessageRef] -> App Int
-processMessageRefs accessToken refs = do
+processMessageRefs :: EntityId -> Text -> [GmailMessageRef] -> App Int
+processMessageRefs accId accessToken refs = do
   results <- forM refs $ \ref -> do
-    msgResult <- liftIO $ getMessage accessToken (refId ref)
-    case msgResult of
-      Left _ -> pure 0
-      Right msg -> do
-        let (subject, sender) = extractEmailInfo msg
-        let newActivity = NewActivity
-              { newActivitySource = Email
-              , newActivitySourceId = gmailId msg
-              , newActivityRaw = toJSON msg
-              , newActivityTitle = subject
-              , newActivitySenderEmail = sender
-              , newActivityStartsAt = Nothing
-              , newActivityEndsAt = Nothing
-              }
-        result <- insertActivity newActivity
-        pure $ case result of
-          Just _ -> 1
-          Nothing -> 0  -- Duplicate, already exists
+    -- Check if already exists for this account
+    exists <- activityExistsForAccount accId Email (refId ref)
+    if exists
+      then pure 0
+      else do
+        msgResult <- liftIO $ getMessage accessToken (refId ref)
+        case msgResult of
+          Left _ -> pure 0
+          Right msg -> do
+            let (subject, sender) = extractEmailInfo msg
+            let newActivity = NewActivity
+                  { newActivityAccountId = accId
+                  , newActivitySource = Email
+                  , newActivitySourceId = gmailId msg
+                  , newActivityRaw = toJSON msg
+                  , newActivityTitle = subject
+                  , newActivitySenderEmail = sender
+                  , newActivityStartsAt = Nothing
+                  , newActivityEndsAt = Nothing
+                  }
+            result <- insertActivity newActivity
+            pure $ case result of
+              Just _ -> 1
+              Nothing -> 0
   pure $ sum results
 
 -- | Extract subject and sender email from a Gmail message
@@ -141,3 +158,11 @@ extractEmailInfo msg =
               subject = findHeader "Subject"
               sender = findHeader "From"
           in (subject, sender)
+
+-- Legacy: poll using first available token
+pollGmail :: App (Either Text Int)
+pollGmail = do
+  results <- pollAllGmail
+  case results of
+    [] -> pure $ Left "No accounts configured"
+    _ -> pure $ Right $ sum [n | (_, Right n) <- results]
