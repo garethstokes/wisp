@@ -5,6 +5,7 @@ module Infra.Db.Activity
   , activityExistsForAccount
   , getActivity
   , getActivitiesByStatus
+  , getActivitiesForToday
   , updateActivityStatus
   , updateActivityClassification
   ) where
@@ -104,6 +105,33 @@ getActivity aid = do
   pure $ case results of
     [a] -> Just a
     _ -> Nothing
+
+-- Get activities for "today" view: surfaced, high-urgency pending, and quarantined
+getActivitiesForToday :: Int -> App [Activity]
+getActivitiesForToday limit = do
+  conn <- getConn
+  liftIO $ query conn
+    "select id, account_id, source, source_id, raw, status, title, summary, \
+    \sender_email, starts_at, ends_at, created_at, \
+    \personas, activity_type, urgency, autonomy_tier, confidence, person_id \
+    \from activities \
+    \where status = 'surfaced' \
+    \   or status = 'quarantined' \
+    \   or (status = 'pending' and urgency = 'high') \
+    \order by \
+    \  case status \
+    \    when 'quarantined' then 1 \
+    \    when 'surfaced' then 2 \
+    \    else 3 \
+    \  end, \
+    \  case urgency \
+    \    when 'high' then 1 \
+    \    when 'normal' then 2 \
+    \    else 3 \
+    \  end, \
+    \  created_at desc \
+    \limit ?"
+    (Only limit)
 
 -- Get activities by status
 getActivitiesByStatus :: ActivityStatus -> Int -> App [Activity]
