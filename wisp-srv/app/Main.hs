@@ -11,7 +11,7 @@ import GHC.Conc (getNumCapabilities)
 import System.Environment (getArgs)
 import System.FilePath (takeDirectory, (</>))
 import System.Log.FastLogger (pushLogStrLn, toLogStr)
-import App.Config (loadConfig, Config(..), ClassificationConfig(..))
+import App.Config (loadConfig, Config(..), ClassificationConfig(..), NotificationConfig(..))
 import App.Env (buildEnv)
 import App.Monad (App, runApp, Env(..), getLogger, getClassificationQueue)
 import Domain.Activity (Activity(..), ActivityStatus(..))
@@ -19,6 +19,7 @@ import Http.Server (startServer)
 import Infra.Db.Activity (getActivitiesByStatus, getActivity)
 import Infra.Db.Migrations (runMigrations)
 import Services.Scheduler (startPolling)
+import Services.NotificationLoop (startNotificationLoop)
 import Services.ClassificationQueue (enqueueActivities, dequeueActivity)
 import Services.Pipeline (processActivity)
 
@@ -61,6 +62,14 @@ main = do
   putStrLn "Starting background polling..."
   pollingThread <- async $ startPolling env
   link pollingThread
+
+  -- Start notification loop if enabled
+  case notifications config of
+    Just notifyCfg | enabled notifyCfg -> do
+      putStrLn "Starting notification loop..."
+      notifyThread <- async $ startNotificationLoop env
+      link notifyThread
+    _ -> putStrLn "Notifications disabled"
 
   putStrLn "Starting wisp-srv..."
   runApp env startServer
