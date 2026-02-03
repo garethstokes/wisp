@@ -71,6 +71,7 @@ executable wisp-srv
         Services.Scheduler
         Services.Chat
         Services.ClassificationQueue
+        Services.Notification
     build-depends:
         base >=4.17 && <5,
         text,
@@ -92,7 +93,8 @@ executable wisp-srv
         filepath,
         async,
         stm,
-        neat-interpolation
+        neat-interpolation,
+        process
 
 test-suite wisp-srv-test
     import:           warnings
