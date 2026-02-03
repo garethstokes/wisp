@@ -13,6 +13,7 @@ module Infra.Db.Activity
   , getPendingEmails
   , updateActivityStatus
   , updateActivityClassification
+  , DbActivity(..)
   ) where
 
 import Control.Monad.IO.Class (liftIO)
