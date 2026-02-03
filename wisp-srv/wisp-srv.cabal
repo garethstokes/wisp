@@ -118,6 +118,7 @@ test-suite wisp-srv-test
         Domain.Activity
         Domain.ActivitySpec
         Domain.Chat
+        Domain.ChatAction
         Domain.ChatSpec
         Domain.Classification
         Domain.ClassificationSpec
@@ -186,6 +187,10 @@ test-suite wisp-srv-test
         Services.ChatSpec
         Services.ClassificationQueue
         Services.ClassificationQueueSpec
+        Services.Notification
+        Services.NotificationLoop
+        Services.NotificationSpec
+        Infra.Db.Notification
         TestEnv
     build-tool-depends:
         hspec-discover:hspec-discover
@@ -211,4 +216,5 @@ test-suite wisp-srv-test
         hspec,
         async,
         stm,
-        neat-interpolation
+        neat-interpolation,
+        process
