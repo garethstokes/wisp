@@ -24,3 +24,12 @@ claude:
   # Override with ANTHROPIC_API_KEY environment variable
   apiKey: "set-via-env"
   model: "claude-sonnet-4-20250514"
+
+notifications:
+  enabled: true
+  default_interval_hours: 4
+  urgent_interval_hours: 2
+  urgent_threshold_count: 3
+  quiet_hours_start: "22:00"
+  quiet_hours_end: "08:00"
+  vip_emails: []

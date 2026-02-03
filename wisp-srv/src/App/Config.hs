@@ -6,10 +6,11 @@ module App.Config
   , PollingConfig(..)
   , ClassificationConfig(..)
   , ClaudeConfig(..)
+  , NotificationConfig(..)
   , loadConfig
   ) where
 
-import Data.Aeson (FromJSON)
+import Data.Aeson (FromJSON(..), withObject, (.:?), (.!=))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Yaml (decodeFileEither)
@@ -62,6 +63,26 @@ instance FromJSON ClaudeConfig
 instance Show ClaudeConfig where
   show c = "ClaudeConfig {apiKey = \"<redacted>\", model = " <> show (model c) <> "}"
 
+data NotificationConfig = NotificationConfig
+  { enabled :: Bool
+  , defaultIntervalHours :: Int
+  , urgentIntervalHours :: Int
+  , urgentThresholdCount :: Int
+  , quietHoursStart :: Text
+  , quietHoursEnd :: Text
+  , vipEmails :: [Text]
+  } deriving (Generic, Show)
+
+instance FromJSON NotificationConfig where
+  parseJSON = withObject "NotificationConfig" $ \v -> NotificationConfig
+    <$> v .:? "enabled" .!= False
+    <*> v .:? "default_interval_hours" .!= 4
+    <*> v .:? "urgent_interval_hours" .!= 2
+    <*> v .:? "urgent_threshold_count" .!= 3
+    <*> v .:? "quiet_hours_start" .!= "22:00"
+    <*> v .:? "quiet_hours_end" .!= "08:00"
+    <*> v .:? "vip_emails" .!= []
+
 data Config = Config
   { server :: ServerConfig
   , database :: DatabaseConfig
@@ -69,6 +90,7 @@ data Config = Config
   , polling :: PollingConfig
   , classification :: ClassificationConfig
   , claude :: ClaudeConfig
+  , notifications :: Maybe NotificationConfig
   } deriving (Generic, Show)
 
 instance FromJSON Config

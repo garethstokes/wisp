@@ -33,6 +33,7 @@ testConfig = Config
       { apiKey = "test-api-key"
       , model = "claude-3-5-haiku-latest"
       }
+  , notifications = Nothing
   }
 
 -- Run an action with a test environment, rolling back after
