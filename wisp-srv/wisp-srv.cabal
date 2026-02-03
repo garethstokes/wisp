@@ -27,6 +27,8 @@ executable wisp-srv
         RecordWildCards
         StrictData
     other-modules:
+        Agents.Concierge
+        Agents.Concierge.Classifier
         App.Config
         App.Monad
         App.Env
@@ -63,10 +65,8 @@ executable wisp-srv
         Infra.Google.Gmail
         Infra.Google.TokenManager
         Services.CalendarPoller
-        Services.Classifier
         Services.GmailPoller
         Services.PeopleResolver
-        Services.Pipeline
         Services.Router
         Services.Scheduler
         Services.Chat
@@ -113,6 +113,10 @@ test-suite wisp-srv-test
         LambdaCase
         QuasiQuotes
     other-modules:
+        Agents.Concierge
+        Agents.Concierge.Classifier
+        Agents.ConciergeSpec
+        Agents.Concierge.ClassifierSpec
         Domain.Account
         Domain.AccountSpec
         Domain.Activity
@@ -172,14 +176,10 @@ test-suite wisp-srv-test
         Infra.Google.TokenManagerSpec
         Services.CalendarPoller
         Services.CalendarPollerSpec
-        Services.Classifier
-        Services.ClassifierSpec
         Services.GmailPoller
         Services.GmailPollerSpec
         Services.PeopleResolver
         Services.PeopleResolverSpec
-        Services.Pipeline
-        Services.PipelineSpec
         Services.Router
         Services.RouterSpec
         Services.Scheduler

@@ -1,6 +1,6 @@
-module Services.Pipeline
-  ( processPendingActivities
-  , processActivity
+module Agents.Concierge
+  ( classifyAllPending
+  , classifyPending
   ) where
 
 import Control.Monad (forM)
@@ -12,22 +12,22 @@ import Domain.Activity (Activity(..), ActivityStatus(..))
 import Domain.Classification (Classification(..))
 import Domain.Person (Person(..))
 import Infra.Db.Activity (getActivitiesByStatus, updateActivityClassification)
-import Services.Classifier (classifyActivity)
+import Agents.Concierge.Classifier (classifyActivity)
 import Services.PeopleResolver (resolvePersonForActivity)
 import Services.Router (routeActivity)
 
 -- Process all pending activities through the pipeline
-processPendingActivities :: Int -> App [(Text, Either Text ActivityStatus)]
-processPendingActivities limit = do
+classifyAllPending :: Int -> App [(Text, Either Text ActivityStatus)]
+classifyAllPending limit = do
   activities <- getActivitiesByStatus Pending limit
   forM activities $ \activity -> do
-    result <- processActivity activity
+    result <- classifyPending activity
     let actId = T.pack $ show (activityId activity)
     pure (actId, result)
 
 -- Process a single activity through classify -> resolve -> route
-processActivity :: Activity -> App (Either Text ActivityStatus)
-processActivity activity = do
+classifyPending :: Activity -> App (Either Text ActivityStatus)
+classifyPending activity = do
   -- Step 1: Classify
   liftIO $ putStrLn $ "Classifying activity: " <> show (activityId activity)
   classifyResult <- classifyActivity activity

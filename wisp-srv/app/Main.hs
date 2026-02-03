@@ -21,7 +21,7 @@ import Infra.Db.Migrations (runMigrations)
 import Services.Scheduler (startPolling)
 import Services.NotificationLoop (startNotificationLoop)
 import Services.ClassificationQueue (enqueueActivities, dequeueActivity)
-import Services.Pipeline (processActivity)
+import Agents.Concierge (classifyPending)
 
 main :: IO ()
 main = do
@@ -100,7 +100,7 @@ classificationWorker env workerId = forever $ do
     case mActivity of
       Nothing -> pure ()  -- Activity was deleted, skip
       Just activity -> do
-        result <- processActivity activity
+        result <- classifyPending activity
         case result of
           Left err -> logWorker workerId $ "Failed " <> T.pack (show aid) <> ": " <> err
           Right status -> logWorker workerId $ "Classified " <> T.pack (show aid) <> " -> " <> T.pack (show status)
