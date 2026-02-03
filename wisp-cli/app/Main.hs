@@ -20,7 +20,7 @@ data Command
   | Status
   | Poll
   | Classify
-  | Today
+  | Inbox
   | Approve Text
   | Dismiss Text
   | People
@@ -37,7 +37,7 @@ commandParser = subparser
   <> command "status" (info (pure Status) (progDesc "Quick status overview"))
   <> command "poll" (info (pure Poll) (progDesc "Trigger a poll cycle"))
   <> command "classify" (info (pure Classify) (progDesc "Run classification pipeline"))
-  <> command "today" (info (pure Today) (progDesc "Show activities requiring attention"))
+  <> command "inbox" (info (pure Inbox) (progDesc "Show activities requiring attention"))
   <> command "approve" (info approveParser (progDesc "Approve a quarantined activity"))
   <> command "dismiss" (info dismissParser (progDesc "Dismiss/archive an activity"))
   <> command "people" (info (pure People) (progDesc "List known people"))
@@ -81,7 +81,7 @@ main = do
     Status -> runStatus
     Poll -> runPoll
     Classify -> runClassify
-    Today -> runToday
+    Inbox -> runInbox
     Approve aid -> runApprove aid
     Dismiss aid -> runDismiss aid
     People -> runPeople
@@ -99,7 +99,7 @@ runHelp = do
   TIO.putStrLn "  status       Show server and auth status"
   TIO.putStrLn "  poll         Trigger a poll cycle"
   TIO.putStrLn "  classify     Run classification pipeline"
-  TIO.putStrLn "  today        Show activities requiring attention"
+  TIO.putStrLn "  inbox        Show activities requiring attention"
   TIO.putStrLn "  approve ID   Approve a quarantined activity"
   TIO.putStrLn "  dismiss ID   Dismiss/archive an activity"
   TIO.putStrLn "  people       List known people"
@@ -110,10 +110,10 @@ runHelp = do
   TIO.putStrLn ""
   TIO.putStrLn "Use --help for more details"
 
-runToday :: IO ()
-runToday = do
+runInbox :: IO ()
+runInbox = do
   manager <- newManager defaultManagerSettings
-  req <- parseRequest $ baseUrl <> "/today"
+  req <- parseRequest $ baseUrl <> "/inbox"
   response <- httpLbs req manager
   case decode (responseBody response) of
     Just (Object obj) -> do
@@ -142,7 +142,7 @@ runToday = do
       case KM.lookup "total" obj of
         Just (Number n) | n == 0 -> TIO.putStrLn "No activities requiring attention."
         _ -> return ()
-    _ -> TIO.putStrLn "Failed to fetch today's activities"
+    _ -> TIO.putStrLn "Failed to fetch inbox"
 
 -- Show a brief activity line
 showActivityBrief :: Text -> Value -> IO ()

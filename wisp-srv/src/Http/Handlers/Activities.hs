@@ -4,7 +4,7 @@ module Http.Handlers.Activities
   , getActivityStats
   , getActivityById
   , getActivityLogs
-  , getToday
+  , getInbox
   , approveActivity
   , dismissActivity
   , triggerPoll
@@ -101,9 +101,9 @@ getActivityLogs = do
         , "count" .= length receipts
         ]
 
--- GET /today - Activities requiring attention today
-getToday :: ActionT (ReaderT Env IO) ()
-getToday = do
+-- GET /inbox - Activities requiring attention
+getInbox :: ActionT (ReaderT Env IO) ()
+getInbox = do
   activities <- lift $ getActivitiesForToday 50
   -- Group by status for the CLI
   let surfaced = [a | a <- activities, activityStatus a == Surfaced]
