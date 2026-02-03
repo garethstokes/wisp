@@ -10,7 +10,10 @@ spec = describe "Classification" $ do
     it "parses a valid classification response" $ do
       let json = "{\"personas\":[\"work\"],\"activity_type\":\"request\",\
                  \\"urgency\":\"normal\",\"autonomy_tier\":2,\
-                 \\"confidence\":0.85,\"summary\":\"Meeting request\"}"
+                 \\"confidence\":0.85,\"summary\":\"Meeting request\",\
+                 \\"reasoning\":\"Work-related meeting request\",\
+                 \\"suggested_actions\":[\"Accept\",\"Decline\"],\
+                 \\"option_framing\":null}"
       case decode json :: Maybe Classification of
         Nothing -> expectationFailure "Failed to parse Classification"
         Just c -> do
@@ -20,6 +23,9 @@ spec = describe "Classification" $ do
           classificationAutonomyTier c `shouldBe` 2
           classificationConfidence c `shouldBe` 0.85
           classificationSummary c `shouldBe` "Meeting request"
+          classificationReasoning c `shouldBe` "Work-related meeting request"
+          classificationSuggestedActions c `shouldBe` ["Accept", "Decline"]
+          classificationOptionFraming c `shouldBe` Nothing
 
   describe "ActivityType" $ do
     it "parses all activity types" $ do

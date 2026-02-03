@@ -2,7 +2,7 @@ module Agents.Concierge.ClassifierSpec where
 
 import Test.Hspec
 import Agents.Concierge.Classifier (buildClassificationPrompt, parseClassificationResponse)
-import Domain.Classification (Classification(..), ActivityType(..), Urgency(..))
+import Domain.Classification (Classification(..), ActivityType(..))
 import Data.Aeson (object, (.=))
 import qualified Data.Text as T
 
@@ -18,12 +18,16 @@ spec = describe "Classifier" $ do
     it "parses valid JSON classification" $ do
       let json = "{\"personas\":[\"work\"],\"activity_type\":\"request\",\
                  \\"urgency\":\"normal\",\"autonomy_tier\":2,\
-                 \\"confidence\":0.85,\"summary\":\"Meeting request\"}"
+                 \\"confidence\":0.85,\"summary\":\"Meeting request\",\
+                 \\"reasoning\":\"Work meeting\",\
+                 \\"suggested_actions\":[\"Accept\"],\
+                 \\"option_framing\":null}"
       case parseClassificationResponse json of
         Left err -> expectationFailure $ "Parse failed: " <> show err
         Right c -> do
           classificationActivityType c `shouldBe` Request
           classificationConfidence c `shouldBe` 0.85
+          classificationReasoning c `shouldBe` "Work meeting"
 
     it "fails on invalid JSON" $ do
       let json = "not valid json"

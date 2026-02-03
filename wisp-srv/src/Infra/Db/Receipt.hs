@@ -23,6 +23,12 @@ instance FromRow Receipt where
     where
       parseAction :: Text -> ReceiptAction
       parseAction "classified" = Classified
+      parseAction "classification_failed" = ClassificationFailed
+      parseAction "routed_to_quarantined" = RoutedToQuarantined
+      parseAction "routed_to_processed" = RoutedToProcessed
+      parseAction "routed_to_surfaced" = RoutedToSurfaced
+      parseAction "routed_to_needs_review" = RoutedToNeedsReview
+      parseAction "routed_to_archived" = RoutedToArchived
       parseAction "quarantined" = Quarantined
       parseAction "processed" = Processed
       parseAction "surfaced" = Surfaced
@@ -35,6 +41,12 @@ insertReceipt new = do
   rid <- liftIO newEntityId
   let actionText = case newReceiptActionTaken new of
         Classified -> "classified" :: Text
+        ClassificationFailed -> "classification_failed"
+        RoutedToQuarantined -> "routed_to_quarantined"
+        RoutedToProcessed -> "routed_to_processed"
+        RoutedToSurfaced -> "routed_to_surfaced"
+        RoutedToNeedsReview -> "routed_to_needs_review"
+        RoutedToArchived -> "routed_to_archived"
         Quarantined -> "quarantined"
         Processed -> "processed"
         Surfaced -> "surfaced"

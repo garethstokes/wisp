@@ -52,7 +52,10 @@ buildClassificationPrompt source mTitle raw = T.unlines
   , "  \"urgency\": \"high\"|\"normal\"|\"low\","
   , "  \"autonomy_tier\": 1-4,  // 1=ignore, 2=note, 3=draft response, 4=needs attention"
   , "  \"confidence\": 0.0-1.0,  // how confident you are in this classification"
-  , "  \"summary\": \"Brief 1-sentence summary\""
+  , "  \"summary\": \"Brief 1-sentence summary\","
+  , "  \"reasoning\": \"Why you classified it this way\","
+  , "  \"suggested_actions\": [\"action1\", \"action2\"],  // what could be done"
+  , "  \"option_framing\": \"How to present to user if surfaced\"  // null for tier 1-2"
   , "}"
   , ""
   , "Guidelines for autonomy_tier:"
@@ -60,6 +63,10 @@ buildClassificationPrompt source mTitle raw = T.unlines
   , "- Tier 2: FYI items, updates, non-urgent info - note but don't surface"
   , "- Tier 3: Requests needing response, calendar invites - draft action for review"
   , "- Tier 4: Urgent items, important people, time-sensitive - surface immediately"
+  , ""
+  , "For suggested_actions, list 1-3 concrete actions the user could take."
+  , "For option_framing, write how you would present this to the user as an option (not a demand)."
+  , "Only include option_framing for tier 3-4 items; set to null for tier 1-2."
   ]
 
 -- Parse classification response from Claude

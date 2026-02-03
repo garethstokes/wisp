@@ -12,6 +12,13 @@ import Domain.Id (EntityId(..))
 
 data ReceiptAction
   = Classified
+  | ClassificationFailed
+  | RoutedToQuarantined
+  | RoutedToProcessed
+  | RoutedToSurfaced
+  | RoutedToNeedsReview
+  | RoutedToArchived
+  -- Legacy (for backwards compat)
   | Quarantined
   | Processed
   | Surfaced
@@ -19,6 +26,12 @@ data ReceiptAction
 
 instance ToJSON ReceiptAction where
   toJSON Classified = "classified"
+  toJSON ClassificationFailed = "classification_failed"
+  toJSON RoutedToQuarantined = "routed_to_quarantined"
+  toJSON RoutedToProcessed = "routed_to_processed"
+  toJSON RoutedToSurfaced = "routed_to_surfaced"
+  toJSON RoutedToNeedsReview = "routed_to_needs_review"
+  toJSON RoutedToArchived = "routed_to_archived"
   toJSON Quarantined = "quarantined"
   toJSON Processed = "processed"
   toJSON Surfaced = "surfaced"
@@ -26,6 +39,12 @@ instance ToJSON ReceiptAction where
 instance FromJSON ReceiptAction where
   parseJSON = withText "ReceiptAction" $ \case
     "classified" -> pure Classified
+    "classification_failed" -> pure ClassificationFailed
+    "routed_to_quarantined" -> pure RoutedToQuarantined
+    "routed_to_processed" -> pure RoutedToProcessed
+    "routed_to_surfaced" -> pure RoutedToSurfaced
+    "routed_to_needs_review" -> pure RoutedToNeedsReview
+    "routed_to_archived" -> pure RoutedToArchived
     "quarantined" -> pure Quarantined
     "processed" -> pure Processed
     "surfaced" -> pure Surfaced
