@@ -33,18 +33,18 @@ data Command
 -- Parse commands
 commandParser :: Parser Command
 commandParser = subparser
-  ( command "auth" (info (pure Auth) (progDesc "Start OAuth flow"))
-  <> command "status" (info (pure Status) (progDesc "Quick status overview"))
-  <> command "poll" (info (pure Poll) (progDesc "Trigger a poll cycle"))
-  <> command "classify" (info (pure Classify) (progDesc "Run classification pipeline"))
-  <> command "inbox" (info (pure Inbox) (progDesc "Show activities requiring attention"))
-  <> command "approve" (info approveParser (progDesc "Approve a quarantined activity"))
-  <> command "dismiss" (info dismissParser (progDesc "Dismiss/archive an activity"))
-  <> command "people" (info (pure People) (progDesc "List known people"))
-  <> command "activity" (info activityParser (progDesc "Show activity details"))
-  <> command "logs" (info logsParser (progDesc "Show activity processing logs"))
-  <> command "chat" (info chatParser (progDesc "Ask Wisp a question"))
-  <> command "help" (info (pure Help) (progDesc "Show help"))
+  ( command "status" (info (pure Status) (progDesc "Server status and activity counts"))
+  <> command "inbox" (info (pure Inbox) (progDesc "Activities needing attention (quarantined, surfaced)"))
+  <> command "activity" (info activityParser (progDesc "Show full details for an activity"))
+  <> command "logs" (info logsParser (progDesc "Show processing history for an activity"))
+  <> command "approve" (info approveParser (progDesc "Move quarantined activity to surfaced"))
+  <> command "dismiss" (info dismissParser (progDesc "Archive an activity"))
+  <> command "chat" (info chatParser (progDesc "Natural language queries and commands"))
+  <> command "people" (info (pure People) (progDesc "List contacts extracted from activities"))
+  <> command "poll" (info (pure Poll) (progDesc "Fetch new emails and calendar events now"))
+  <> command "classify" (info (pure Classify) (progDesc "Run classification on pending activities"))
+  <> command "auth" (info (pure Auth) (progDesc "Add a Google account via OAuth"))
+  <> command "help" (info (pure Help) (progDesc "Show this help"))
   )
 
 logsParser :: Parser Command
@@ -62,8 +62,12 @@ approveParser = Approve <$> strArgument (metavar "ID" <> help "Activity ID to ap
 dismissParser :: Parser Command
 dismissParser = Dismiss <$> strArgument (metavar "ID" <> help "Activity ID to dismiss")
 
+-- Parser that defaults to Help when no command given
+commandParserWithDefault :: Parser Command
+commandParserWithDefault = commandParser <|> pure Help
+
 opts :: ParserInfo Command
-opts = info (commandParser <**> helper)
+opts = info (commandParserWithDefault <**> helper)
   ( fullDesc
   <> progDesc "Wisp personal assistant CLI"
   <> header "wisp - your autonomy-preserving assistant"
@@ -95,20 +99,20 @@ runHelp = do
   TIO.putStrLn "wisp - your autonomy-preserving assistant"
   TIO.putStrLn ""
   TIO.putStrLn "Commands:"
-  TIO.putStrLn "  auth         Start OAuth flow with Google"
-  TIO.putStrLn "  status       Show server and auth status"
-  TIO.putStrLn "  poll         Trigger a poll cycle"
-  TIO.putStrLn "  classify     Run classification pipeline"
-  TIO.putStrLn "  inbox        Show activities requiring attention"
-  TIO.putStrLn "  approve ID   Approve a quarantined activity"
-  TIO.putStrLn "  dismiss ID   Dismiss/archive an activity"
-  TIO.putStrLn "  people       List known people"
-  TIO.putStrLn "  activity ID  Show detailed activity info"
-  TIO.putStrLn "  logs ID      Show activity processing logs"
-  TIO.putStrLn "  chat MSG     Ask Wisp a question"
-  TIO.putStrLn "  help         Show this help"
+  TIO.putStrLn "  status         Server status and activity counts"
+  TIO.putStrLn "  inbox          Activities needing attention"
+  TIO.putStrLn "  activity ID    Show full details for an activity"
+  TIO.putStrLn "  logs ID        Show processing history for an activity"
+  TIO.putStrLn "  approve ID     Move quarantined activity to surfaced"
+  TIO.putStrLn "  dismiss ID     Archive an activity"
+  TIO.putStrLn "  chat MSG       Natural language queries and commands"
+  TIO.putStrLn "  people         List contacts from activities"
+  TIO.putStrLn "  poll           Fetch new emails and events now"
+  TIO.putStrLn "  classify       Run classification on pending activities"
+  TIO.putStrLn "  auth           Add a Google account via OAuth"
   TIO.putStrLn ""
-  TIO.putStrLn "Use --help for more details"
+  TIO.putStrLn "Activity IDs are shown in brackets, e.g. [abc123]"
+  TIO.putStrLn "Use 'wisp inbox' to see activities and their IDs"
 
 runInbox :: IO ()
 runInbox = do
