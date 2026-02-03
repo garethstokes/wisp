@@ -72,6 +72,7 @@ executable wisp-srv
         Services.Chat
         Services.ClassificationQueue
         Services.Notification
+        Services.NotificationLoop
     build-depends:
         base >=4.17 && <5,
         text,
