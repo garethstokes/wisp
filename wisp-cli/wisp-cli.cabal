@@ -21,7 +21,11 @@ executable wisp
         base >=4.17 && <5,
         text,
         aeson,
+        bytestring,
+        directory,
+        filepath,
         http-client,
         http-client-tls,
         optparse-applicative,
-        process
+        process,
+        time

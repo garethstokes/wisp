@@ -2,16 +2,22 @@
 module Main where
 
 import Control.Concurrent (threadDelay)
-import Control.Monad (when)
-import Data.Aeson (Value(..), decode, encode, object, (.=))
+import Control.Monad (when, forM_)
+import Data.Aeson (Value(..), FromJSON(..), ToJSON(..), decode, encode, object, withObject, (.=), (.:), (.:?))
 import Data.Foldable (toList)
+import Data.List (isSuffixOf)
 import Data.String (fromString)
 import Data.Text (Text, pack, unpack)
 import qualified Data.Text as T
 import qualified Data.Aeson.KeyMap as KM
+import qualified Data.ByteString.Lazy as BL
 import qualified Data.Text.IO as TIO
+import Data.Time (getCurrentTime)
+import Data.Time.Format.ISO8601 (iso8601Show)
 import Network.HTTP.Client
 import Options.Applicative
+import System.Directory (createDirectoryIfMissing, doesFileExist, listDirectory, removeFile, getHomeDirectory)
+import System.FilePath ((</>))
 import System.Process (callCommand)
 
 -- CLI Command types
@@ -101,6 +107,77 @@ opts = info (commandParserWithDefault <**> helper)
 -- Base URL for wisp-srv
 baseUrl :: String
 baseUrl = "http://127.0.0.1:8080"
+
+--------------------------------------------------------------------------------
+-- Session Management Types
+--------------------------------------------------------------------------------
+
+data Session = Session
+  { sessionAgent     :: Text
+  , sessionCreatedAt :: Text
+  , sessionUpdatedAt :: Text
+  , sessionMessages  :: [SessionMessage]
+  } deriving (Show)
+
+data SessionMessage = SessionMessage
+  { smRole     :: Text
+  , smContent  :: Text
+  , smToolCall :: Maybe Value
+  } deriving (Show)
+
+instance FromJSON Session where
+  parseJSON = withObject "Session" $ \v -> Session
+    <$> v .: "agent"
+    <*> v .: "created_at"
+    <*> v .: "updated_at"
+    <*> v .: "messages"
+
+instance ToJSON Session where
+  toJSON s = object
+    [ "agent" .= sessionAgent s
+    , "created_at" .= sessionCreatedAt s
+    , "updated_at" .= sessionUpdatedAt s
+    , "messages" .= sessionMessages s
+    ]
+
+instance FromJSON SessionMessage where
+  parseJSON = withObject "SessionMessage" $ \v -> SessionMessage
+    <$> v .: "role"
+    <*> v .: "content"
+    <*> v .:? "tool_call"
+
+instance ToJSON SessionMessage where
+  toJSON m = object $
+    [ "role" .= smRole m
+    , "content" .= smContent m
+    ] ++ maybe [] (\tc -> ["tool_call" .= tc]) (smToolCall m)
+
+getSessionsDir :: IO FilePath
+getSessionsDir = do
+  home <- getHomeDirectory
+  let dir = home </> ".wisp" </> "sessions"
+  createDirectoryIfMissing True dir
+  pure dir
+
+getSessionPath :: Text -> IO FilePath
+getSessionPath name = do
+  dir <- getSessionsDir
+  pure $ dir </> unpack name <> ".json"
+
+loadSession :: Text -> IO (Maybe Session)
+loadSession name = do
+  path <- getSessionPath name
+  exists <- doesFileExist path
+  if exists
+    then decode <$> BL.readFile path
+    else pure Nothing
+
+saveSession :: Text -> Session -> IO ()
+saveSession name session = do
+  path <- getSessionPath name
+  BL.writeFile path (encode session)
+
+--------------------------------------------------------------------------------
 
 main :: IO ()
 main = do
@@ -508,34 +585,85 @@ showAgent _ = return ()
 runChatWithOptions :: ChatOptions -> IO ()
 runChatWithOptions chatOpts = do
   let agent = chatOptAgent chatOpts
+  let sessionName = chatOptSession chatOpts
+  let isNew = chatOptNew chatOpts
+
   case chatOptMessage chatOpts of
     Nothing -> TIO.putStrLn "Please provide a message with --message"
     Just msg -> do
-      manager <- newManager defaultManagerSettings
-      initialReq <- parseRequest $ baseUrl <> "/chat"
-      -- For now, just send single message (session support in Task 10)
-      let reqBody = object
-            [ "agent" .= agent
-            , "messages" .= [object ["role" .= ("user" :: Text), "content" .= msg]]
-            ]
-      let req = initialReq
-            { method = "POST"
-            , requestHeaders = [("Content-Type", "application/json")]
-            , requestBody = RequestBodyLBS (encode reqBody)
-            }
-      response <- httpLbs req manager
-      case decode (responseBody response) of
-        Just (Object obj) -> case KM.lookup "message" obj of
-          Just (String s) -> TIO.putStrLn s
-          _ -> case KM.lookup "error" obj of
-            Just (String err) -> TIO.putStrLn $ "Error: " <> err
-            _ -> TIO.putStrLn "Unexpected response"
-        _ -> TIO.putStrLn "Failed to parse response"
+      -- Load or create session
+      existingSession <- if isNew then pure Nothing else loadSession sessionName
+
+      -- Validate agent matches session
+      case existingSession of
+        Just s | sessionAgent s /= agent -> do
+          TIO.putStrLn $ "Session '" <> sessionName <> "' is bound to " <> sessionAgent s <> ", not " <> agent
+        _ -> do
+          -- Build messages list
+          now <- pack . iso8601Show <$> getCurrentTime
+          let existingMessages = maybe [] sessionMessages existingSession
+          let newUserMsg = SessionMessage "user" msg Nothing
+          let allMessages = existingMessages ++ [newUserMsg]
+
+          -- Send to server
+          manager <- newManager defaultManagerSettings
+          initialReq <- parseRequest $ baseUrl <> "/chat"
+          let reqBody = object
+                [ "agent" .= agent
+                , "messages" .= [object ["role" .= smRole m, "content" .= smContent m] | m <- allMessages]
+                ]
+          let req = initialReq
+                { method = "POST"
+                , requestHeaders = [("Content-Type", "application/json")]
+                , requestBody = RequestBodyLBS (encode reqBody)
+                }
+          response <- httpLbs req manager
+
+          case decode (responseBody response) of
+            Just (Object obj) -> case KM.lookup "message" obj of
+              Just (String respMsg) -> do
+                TIO.putStrLn respMsg
+
+                -- Save session with response
+                let toolCall = KM.lookup "tool_call" obj
+                let assistantMsg = SessionMessage "assistant" respMsg toolCall
+                let updatedMessages = allMessages ++ [assistantMsg]
+                let session = Session
+                      { sessionAgent = agent
+                      , sessionCreatedAt = maybe now sessionCreatedAt existingSession
+                      , sessionUpdatedAt = now
+                      , sessionMessages = updatedMessages
+                      }
+                saveSession sessionName session
+
+              _ -> case KM.lookup "error" obj of
+                Just (String err) -> TIO.putStrLn $ "Error: " <> err
+                _ -> TIO.putStrLn "Unexpected response"
+            _ -> TIO.putStrLn "Failed to parse response"
 
 runSessions :: SessionsOptions -> IO ()
-runSessions _opts = do
-  -- Placeholder for Task 10
-  TIO.putStrLn "Session management not yet implemented. Coming soon!"
+runSessions sessOpts = case sessionsDelete sessOpts of
+  Just name -> do
+    path <- getSessionPath name
+    exists <- doesFileExist path
+    if exists
+      then do
+        removeFile path
+        TIO.putStrLn $ "Deleted session: " <> name
+      else TIO.putStrLn $ "Session not found: " <> name
+  Nothing -> do
+    dir <- getSessionsDir
+    files <- listDirectory dir
+    let sessions = [pack (takeWhile (/= '.') f) | f <- files, ".json" `isSuffixOf` f]
+    if null sessions
+      then TIO.putStrLn "No sessions found."
+      else do
+        TIO.putStrLn "Sessions:"
+        forM_ sessions $ \name -> do
+          mSession <- loadSession name
+          case mSession of
+            Just s -> TIO.putStrLn $ "  " <> name <> " (" <> sessionAgent s <> ", " <> showT (length (sessionMessages s)) <> " messages)"
+            Nothing -> TIO.putStrLn $ "  " <> name <> " (corrupt)"
 
 runClassify :: IO ()
 runClassify = do
