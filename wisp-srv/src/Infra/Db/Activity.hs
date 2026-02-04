@@ -11,6 +11,8 @@ module Infra.Db.Activity
   , getActivitiesForToday
   , getRecentActivities
   , getTodaysCalendarEvents
+  , getCalendarEventsInRange
+  , getUpcomingCalendarEvents
   , getPendingEmails
   , updateActivityStatus
   , updateActivityClassification
@@ -180,6 +182,38 @@ getTodaysCalendarEvents = do
     \  and starts_at < date_trunc('day', now()) + interval '1 day' \
     \order by starts_at"
     ()
+  pure $ map unDbActivity results
+
+-- Get calendar events within a date range
+getCalendarEventsInRange :: UTCTime -> UTCTime -> App [Activity]
+getCalendarEventsInRange startTime endTime = do
+  conn <- getConn
+  results <- liftIO $ query conn
+    "select id, account_id, source, source_id, raw, status, title, summary, \
+    \sender_email, starts_at, ends_at, created_at, \
+    \personas, activity_type, urgency, autonomy_tier, confidence, person_id \
+    \from activities \
+    \where source = 'calendar' \
+    \  and starts_at >= ? \
+    \  and starts_at < ? \
+    \order by starts_at"
+    (startTime, endTime)
+  pure $ map unDbActivity results
+
+-- Get upcoming calendar events (next N days)
+getUpcomingCalendarEvents :: Int -> App [Activity]
+getUpcomingCalendarEvents days = do
+  conn <- getConn
+  results <- liftIO $ query conn
+    "select id, account_id, source, source_id, raw, status, title, summary, \
+    \sender_email, starts_at, ends_at, created_at, \
+    \personas, activity_type, urgency, autonomy_tier, confidence, person_id \
+    \from activities \
+    \where source = 'calendar' \
+    \  and starts_at >= now() \
+    \  and starts_at < now() + interval '1 day' * ? \
+    \order by starts_at"
+    (Only days)
   pure $ map unDbActivity results
 
 -- Get pending emails (for chat context)
