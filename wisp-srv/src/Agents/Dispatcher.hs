@@ -26,9 +26,11 @@ getAgent aid = case [a | a <- allAgents, agentId a == aid] of
   [a] -> Just a
   _ -> Nothing
 
-dispatchChat :: Text -> [ChatMessage] -> App (Either Text ChatResponse)
-dispatchChat "wisp/concierge" msgs = Concierge.handleChat msgs
-dispatchChat "wisp/scheduler" _ = pure $ Left "Agent 'wisp/scheduler' not yet implemented"
-dispatchChat "wisp/housekeeper" _ = pure $ Left "Agent 'wisp/housekeeper' not yet implemented"
-dispatchChat "wisp/insights" _ = pure $ Left "Agent 'wisp/insights' not yet implemented"
-dispatchChat agent _ = pure $ Left $ "Unknown agent: " <> agent
+-- | Dispatch chat to the appropriate agent
+-- timezone: Optional IANA timezone for converting dates to local time in agent context
+dispatchChat :: Text -> [ChatMessage] -> Maybe Text -> App (Either Text ChatResponse)
+dispatchChat "wisp/concierge" msgs tz = Concierge.handleChat msgs tz
+dispatchChat "wisp/scheduler" _ _ = pure $ Left "Agent 'wisp/scheduler' not yet implemented"
+dispatchChat "wisp/housekeeper" _ _ = pure $ Left "Agent 'wisp/housekeeper' not yet implemented"
+dispatchChat "wisp/insights" _ _ = pure $ Left "Agent 'wisp/insights' not yet implemented"
+dispatchChat agent _ _ = pure $ Left $ "Unknown agent: " <> agent

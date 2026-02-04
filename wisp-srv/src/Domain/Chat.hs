@@ -44,12 +44,14 @@ instance ToJSON ChatMessage where
 data ChatRequest = ChatRequest
   { chatAgent    :: Text
   , chatMessages :: [ChatMessage]
+  , chatTimezone :: Maybe Text  -- IANA timezone for local time conversion
   } deriving (Show)
 
 instance FromJSON ChatRequest where
   parseJSON = withObject "ChatRequest" $ \v -> ChatRequest
     <$> v .: "agent"
     <*> v .: "messages"
+    <*> v .:? "timezone"
 
 -- Chat response (updated)
 data ChatResponse = ChatResponse

@@ -19,6 +19,7 @@ postChat = do
   req <- jsonData :: ActionT (ReaderT Env IO) ChatRequest
   let agent = chatAgent req
   let messages = chatMessages req
+  let tz = chatTimezone req  -- Optional timezone from client
 
   -- Validate agent exists
   case getAgent agent of
@@ -32,8 +33,8 @@ postChat = do
           status status400
           json $ object ["error" .= ("Agent not implemented: " <> agent :: Text)]
         else do
-          -- Dispatch to agent
-          result <- lift $ dispatchChat agent messages
+          -- Dispatch to agent with timezone
+          result <- lift $ dispatchChat agent messages tz
           case result of
             Left err -> do
               status status500

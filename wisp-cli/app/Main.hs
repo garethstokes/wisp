@@ -12,13 +12,16 @@ import qualified Data.Text as T
 import qualified Data.Aeson.KeyMap as KM
 import qualified Data.ByteString.Lazy as BL
 import qualified Data.Text.IO as TIO
-import Data.Time (getCurrentTime)
-import Data.Time.Format.ISO8601 (iso8601Show)
+import Data.Time (getCurrentTime, UTCTime)
+import Data.Time.Format.ISO8601 (iso8601Show, iso8601ParseM)
 import Network.HTTP.Client
 import Options.Applicative
 import System.Directory (createDirectoryIfMissing, doesFileExist, listDirectory, removeFile, getHomeDirectory)
 import System.FilePath ((</>))
 import System.Process (callCommand)
+
+import Config (CliConfig(..), loadCliConfig)
+import Time (TZ, loadTimezone, utcToLocal)
 
 -- CLI Command types
 data Command
@@ -182,19 +185,22 @@ saveSession name session = do
 main :: IO ()
 main = do
   cmd <- execParser opts
+  -- Load config and timezone for commands that need it
+  cfg <- loadCliConfig
+  tz <- loadTimezone (timezone cfg)
   case cmd of
     Auth -> runAuth
     Status -> runStatus
     Poll -> runPoll
     Classify -> runClassify
-    Inbox -> runInbox
-    Review -> runReview
+    Inbox -> runInbox tz
+    Review -> runReview tz
     Approve aid -> runApprove aid
     Dismiss aid -> runDismiss aid
     People -> runPeople
-    Activity aid -> runActivity aid
+    Activity aid -> runActivity tz aid
     Logs aid -> runLogs aid
-    Chat chatOpts -> runChatWithOptions chatOpts
+    Chat chatOpts -> runChatWithOptions cfg chatOpts
     Agents -> runAgents
     Sessions sessOpts -> runSessions sessOpts
     Help -> runHelp
@@ -232,8 +238,8 @@ runHelp = do
   TIO.putStrLn ""
   TIO.putStrLn "Activity IDs are shown in brackets, e.g. [abc123]"
 
-runInbox :: IO ()
-runInbox = do
+runInbox :: TZ -> IO ()
+runInbox tz = do
   manager <- newManager defaultManagerSettings
   req <- parseRequest $ baseUrl <> "/inbox"
   response <- httpLbs req manager
@@ -243,28 +249,28 @@ runInbox = do
       case KM.lookup "calendar" obj of
         Just (Array items) | not (null items) -> do
           TIO.putStrLn "📅 Today's Schedule:"
-          showCalendarWithGaps (toList items)
+          showCalendarWithGaps tz (toList items)
           TIO.putStrLn ""
         _ -> return ()
       -- Show quarantined items (need decision)
       case KM.lookup "quarantined" obj of
         Just (Array items) | not (null items) -> do
           TIO.putStrLn "⚠️  Quarantined (needs review):"
-          mapM_ (showActivityBrief "  ") (toList items)
+          mapM_ (showActivityBrief tz "  ") (toList items)
           TIO.putStrLn ""
         _ -> return ()
       -- Show surfaced items (ready to act)
       case KM.lookup "surfaced" obj of
         Just (Array items) | not (null items) -> do
           TIO.putStrLn "📋 Ready for action:"
-          mapM_ (showActivityBrief "  ") (toList items)
+          mapM_ (showActivityBrief tz "  ") (toList items)
           TIO.putStrLn ""
         _ -> return ()
       -- Show high urgency pending
       case KM.lookup "high_urgency" obj of
         Just (Array items) | not (null items) -> do
           TIO.putStrLn "🔥 High urgency (pending classification):"
-          mapM_ (showActivityBrief "  ") (toList items)
+          mapM_ (showActivityBrief tz "  ") (toList items)
           TIO.putStrLn ""
         _ -> return ()
       -- Show summary if nothing to show
@@ -282,9 +288,9 @@ runInbox = do
     _ -> TIO.putStrLn "Failed to fetch inbox"
 
 -- Show calendar events with gaps highlighted
-showCalendarWithGaps :: [Value] -> IO ()
-showCalendarWithGaps [] = TIO.putStrLn "  No events today."
-showCalendarWithGaps events = do
+showCalendarWithGaps :: TZ -> [Value] -> IO ()
+showCalendarWithGaps _ [] = TIO.putStrLn "  No events today."
+showCalendarWithGaps tz events = do
   -- Sort events by start time and show with gaps
   let sorted = sortByStartTime events
   showEventsWithGaps Nothing sorted
@@ -303,7 +309,7 @@ showCalendarWithGaps events = do
           TIO.putStrLn gap
         _ -> return ()
       -- Show the event
-      showCalendarEvent e
+      showCalendarEvent tz e
       showEventsWithGaps mEnd es
 
     getStartTime (Object o) = case KM.lookup "starts_at" o of
@@ -317,29 +323,25 @@ showCalendarWithGaps events = do
     getEndTime _ = Nothing
 
     formatTimeRange start end =
-      extractTime start <> " - " <> extractTime end
-
-    extractTime t = T.take 5 $ T.drop 11 $ T.takeWhile (/= '.') t  -- "HH:MM"
+      formatTimeLocal tz start <> " - " <> formatTimeLocal tz end
 
 -- Show a calendar event
-showCalendarEvent :: Value -> IO ()
-showCalendarEvent (Object e) = do
+showCalendarEvent :: TZ -> Value -> IO ()
+showCalendarEvent tz (Object e) = do
   let title = case KM.lookup "title" e of
         Just (String s) -> s
         _ -> "(no title)"
   let timeStr = case KM.lookup "starts_at" e of
-        Just (String s) -> extractTime s
+        Just (String s) -> formatTimeLocal tz s
         _ -> "??:??"
   let endStr = case KM.lookup "ends_at" e of
-        Just (String s) -> " - " <> extractTime s
+        Just (String s) -> " - " <> formatTimeLocal tz s
         _ -> ""
   TIO.putStrLn $ "  📅 " <> timeStr <> endStr <> " " <> title
-  where
-    extractTime t = T.take 5 $ T.drop 11 $ T.takeWhile (/= '.') t
-showCalendarEvent _ = return ()
+showCalendarEvent _ _ = return ()
 
-runReview :: IO ()
-runReview = do
+runReview :: TZ -> IO ()
+runReview tz = do
   manager <- newManager defaultManagerSettings
   req <- parseRequest $ baseUrl <> "/review"
   response <- httpLbs req manager
@@ -352,15 +354,15 @@ runReview = do
                 _ -> length (toList items)
           TIO.putStrLn $ "🔍 Needs Review (" <> showT (length (toList items)) <> " of " <> showT total <> "):"
           TIO.putStrLn ""
-          mapM_ (showActivityBrief "  ") (toList items)
+          mapM_ (showActivityBrief tz "  ") (toList items)
           TIO.putStrLn ""
           TIO.putStrLn "Use 'wisp activity ID' to see details, 'wisp approve ID' or 'wisp dismiss ID' to act"
         _ -> TIO.putStrLn "No activities needing review."
     _ -> TIO.putStrLn "Failed to fetch review queue"
 
 -- Show a brief activity line
-showActivityBrief :: Text -> Value -> IO ()
-showActivityBrief prefix (Object act) = do
+showActivityBrief :: TZ -> Text -> Value -> IO ()
+showActivityBrief tz prefix (Object act) = do
   let getId = case KM.lookup "id" act of
         Just (String s) -> s
         _ -> "?"
@@ -378,32 +380,65 @@ showActivityBrief prefix (Object act) = do
         _ -> "📝"
   -- Get date from starts_at (for calendar) or created_at (for email)
   let getDate = case KM.lookup "starts_at" act of
-        Just (String s) -> formatDate s
+        Just (String s) -> formatDateLocal tz s
         _ -> case KM.lookup "created_at" act of
-          Just (String s) -> formatDate s
+          Just (String s) -> formatDateLocal tz s
           _ -> ""
   let datePart = if getDate == "" then "" else getDate <> " "
   TIO.putStrLn $ prefix <> getSource <> " " <> getUrgency <> " " <> datePart <> "[" <> getId <> "] " <> getTitle
-showActivityBrief _ _ = return ()
+showActivityBrief _ _ _ = return ()
 
--- Format ISO date to short form (e.g., "Jan 30" or "Feb 3 14:00")
-formatDate :: Text -> Text
-formatDate isoDate =
-  let dateStr = T.takeWhile (/= '.') isoDate  -- Remove milliseconds
-      -- Extract date and time parts
-      datePart = T.take 10 dateStr  -- "2026-01-30"
-      timePart = T.drop 11 dateStr  -- "14:00:00" or empty
-      -- Parse month and day
+-- Parse ISO8601 UTC time and convert to local timezone, returning just HH:MM
+formatTimeLocal :: TZ -> Text -> Text
+formatTimeLocal tz isoDate =
+  case parseUtcTime isoDate of
+    Nothing -> T.take 5 $ T.drop 11 $ T.takeWhile (/= '.') isoDate  -- fallback to raw extraction
+    Just utc ->
+      let local = utcToLocal tz utc
+          timeStr = T.pack $ show local  -- "2026-02-04 14:30:00"
+      in T.take 5 $ T.drop 11 timeStr  -- "14:30"
+
+-- Parse ISO8601 UTC time and convert to local, returning "Mon D HH:MM" or "Mon D"
+formatDateLocal :: TZ -> Text -> Text
+formatDateLocal tz isoDate =
+  case parseUtcTime isoDate of
+    Nothing -> formatDateFallback isoDate  -- fallback to raw parsing
+    Just utc ->
+      let local = utcToLocal tz utc
+          localStr = T.pack $ show local  -- "2026-02-04 14:30:00"
+          datePart = T.take 10 localStr  -- "2026-02-04"
+          timePart = T.drop 11 localStr  -- "14:30:00"
+          month = case T.take 2 (T.drop 5 datePart) of
+            "01" -> "Jan"; "02" -> "Feb"; "03" -> "Mar"; "04" -> "Apr"
+            "05" -> "May"; "06" -> "Jun"; "07" -> "Jul"; "08" -> "Aug"
+            "09" -> "Sep"; "10" -> "Oct"; "11" -> "Nov"; "12" -> "Dec"
+            _ -> "???"
+          day = T.dropWhile (== '0') $ T.drop 8 datePart
+          time = T.take 5 timePart
+      in if T.null timePart || time == "00:00"
+         then month <> " " <> day
+         else month <> " " <> day <> " " <> time
+
+-- Fallback date formatting when parsing fails (uses raw ISO string)
+formatDateFallback :: Text -> Text
+formatDateFallback isoDate =
+  let dateStr = T.takeWhile (/= '.') isoDate
+      datePart = T.take 10 dateStr
+      timePart = T.drop 11 dateStr
       month = case T.take 2 (T.drop 5 datePart) of
         "01" -> "Jan"; "02" -> "Feb"; "03" -> "Mar"; "04" -> "Apr"
         "05" -> "May"; "06" -> "Jun"; "07" -> "Jul"; "08" -> "Aug"
         "09" -> "Sep"; "10" -> "Oct"; "11" -> "Nov"; "12" -> "Dec"
         _ -> "???"
       day = T.dropWhile (== '0') $ T.drop 8 datePart
-      time = T.take 5 timePart  -- "14:00"
+      time = T.take 5 timePart
   in if T.null timePart || time == "00:00"
      then month <> " " <> day
      else month <> " " <> day <> " " <> time
+
+-- Parse ISO8601 UTC time string to UTCTime
+parseUtcTime :: Text -> Maybe UTCTime
+parseUtcTime t = iso8601ParseM (T.unpack t)
 
 runApprove :: Text -> IO ()
 runApprove aid = do
@@ -468,8 +503,8 @@ showPersonBrief (Object p) = do
   TIO.putStrLn $ "  📧 " <> getEmail <> displayName <> " - " <> showT getCount <> " contacts"
 showPersonBrief _ = return ()
 
-runActivity :: Text -> IO ()
-runActivity aid = do
+runActivity :: TZ -> Text -> IO ()
+runActivity tz aid = do
   manager <- newManager defaultManagerSettings
   req <- parseRequest $ baseUrl <> "/activities/" <> unpack aid
   response <- httpLbs req manager
@@ -491,9 +526,9 @@ runActivity aid = do
       showField "  Confidence" "confidence" act
       showArrayField "  Personas" "personas" act
       TIO.putStrLn ""
-      showField "Created" "created_at" act
-      showField "Starts" "starts_at" act
-      showField "Ends" "ends_at" act
+      showDateField tz "Created" "created_at" act
+      showDateField tz "Starts" "starts_at" act
+      showDateField tz "Ends" "ends_at" act
     _ -> TIO.putStrLn "❌ Failed to fetch activity (not found or error)"
 
 -- Show a field from a JSON object
@@ -504,6 +539,22 @@ showField label key obj = case KM.lookup (fromString $ unpack key) obj of
   Just Null -> return ()
   Just v -> TIO.putStrLn $ label <> ": " <> pack (show v)
   Nothing -> return ()
+
+-- Show a date field, converting from UTC to local timezone
+showDateField :: TZ -> Text -> Text -> KM.KeyMap Value -> IO ()
+showDateField tz label key obj = case KM.lookup (fromString $ unpack key) obj of
+  Just (String s) -> TIO.putStrLn $ label <> ": " <> formatDateTimeLocal tz s
+  Just Null -> return ()
+  _ -> return ()
+
+-- Format full datetime in local timezone (for activity details view)
+formatDateTimeLocal :: TZ -> Text -> Text
+formatDateTimeLocal tz isoDate =
+  case parseUtcTime isoDate of
+    Nothing -> isoDate  -- fallback to raw string
+    Just utc ->
+      let local = utcToLocal tz utc
+      in T.pack $ show local  -- "2026-02-04 14:30:00"
 
 -- Show an array field
 showArrayField :: Text -> Text -> KM.KeyMap Value -> IO ()
@@ -594,8 +645,8 @@ showAgent (Object a) = do
   TIO.putStrLn ""
 showAgent _ = return ()
 
-runChatWithOptions :: ChatOptions -> IO ()
-runChatWithOptions chatOpts = do
+runChatWithOptions :: CliConfig -> ChatOptions -> IO ()
+runChatWithOptions cfg chatOpts = do
   let agent = chatOptAgent chatOpts
   let sessionName = chatOptSession chatOpts
   let isNew = chatOptNew chatOpts
@@ -617,12 +668,13 @@ runChatWithOptions chatOpts = do
           let newUserMsg = SessionMessage "user" msg Nothing
           let allMessages = existingMessages ++ [newUserMsg]
 
-          -- Send to server
+          -- Send to server with timezone
           manager <- newManager defaultManagerSettings
           initialReq <- parseRequest $ baseUrl <> "/chat"
           let reqBody = object
                 [ "agent" .= agent
                 , "messages" .= [object ["role" .= smRole m, "content" .= smContent m] | m <- allMessages]
+                , "timezone" .= timezone cfg  -- Include user's timezone
                 ]
           let req = initialReq
                 { method = "POST"

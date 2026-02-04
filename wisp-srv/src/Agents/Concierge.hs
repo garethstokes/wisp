@@ -16,6 +16,7 @@ module Agents.Concierge
   , agentInfo
   ) where
 
+import Control.Exception (try, SomeException)
 import Control.Monad (forM, forM_, void)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Reader (asks)
@@ -26,6 +27,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
 import Data.Time (UTCTime)
+import Data.Time.Zones (TZ, loadSystemTZ, utcToLocalTimeTZ)
 import GHC.Generics (Generic)
 import App.Monad (App, Env(..))
 import App.Config (Config(..), ClaudeConfig(..))
@@ -45,6 +47,18 @@ import Domain.Chat (ChatMessage(..), ChatResponse)
 import qualified Domain.Chat as Chat
 import Services.PeopleResolver (resolvePersonForActivity)
 import Services.Router (routeActivity)
+
+--------------------------------------------------------------------------------
+-- Timezone Loading
+--------------------------------------------------------------------------------
+
+-- | Load timezone from IANA name, returning Nothing if invalid
+loadTimezone :: Text -> IO (Maybe TZ)
+loadTimezone tzName = do
+  result <- try $ loadSystemTZ (T.unpack tzName)
+  case result of
+    Left (_ :: SomeException) -> pure Nothing
+    Right tz -> pure (Just tz)
 
 --------------------------------------------------------------------------------
 -- Tool Call Types
@@ -196,7 +210,7 @@ executeToolCall (QueryActivities filt) = do
     _ -> getActivitiesFiltered mStatus (filterSince filt) (filterBefore filt) limit
 
   pure $ ToolSuccess $ object
-    [ "activities" .= map activityToJson activities
+    [ "activities" .= map (activityToJson Nothing) activities  -- Tool results stay in UTC
     , "count" .= length activities
     ]
 
@@ -215,8 +229,10 @@ executeToolCall (QueryPeople filt) = do
     , "count" .= length people
     ]
 
-activityToJson :: Activity -> Value
-activityToJson a = object
+-- | Convert activity to JSON for agent context
+-- If timezone is provided, converts UTC times to local time (no Z suffix)
+activityToJson :: Maybe TZ -> Activity -> Value
+activityToJson mTz a = object
   [ "id" .= unEntityId (activityId a)
   , "title" .= activityTitle a
   , "status" .= activityStatus a
@@ -224,7 +240,16 @@ activityToJson a = object
   , "summary" .= activitySummary a
   , "autonomy_tier" .= activityAutonomyTier a
   , "urgency" .= activityUrgency a
+  , "starts_at" .= fmap (formatTime mTz) (activityStartsAt a)
+  , "ends_at" .= fmap (formatTime mTz) (activityEndsAt a)
   ]
+
+-- | Format UTCTime, converting to local if timezone provided
+formatTime :: Maybe TZ -> UTCTime -> Text
+formatTime Nothing utc = T.pack $ show utc  -- UTC format with space
+formatTime (Just tz) utc =
+  let local = utcToLocalTimeTZ tz utc
+  in T.pack $ show local  -- Local format without Z suffix
 
 personToJson :: Person -> Value
 personToJson p = object
@@ -248,21 +273,27 @@ instance FromJSON LLMResponse where
     <$> v .: "message"
     <*> v .:? "tool_call"
 
-handleChat :: [ChatMessage] -> App (Either Text ChatResponse)
-handleChat messages = do
+handleChat :: [ChatMessage] -> Maybe Text -> App (Either Text ChatResponse)
+handleChat messages mTzName = do
   -- Get the last user message
   let userMessages = [m | m <- messages, messageRole m == "user"]
   case userMessages of
     [] -> pure $ Left "No user message provided"
     _ -> do
       let query = messageContent (last userMessages)
+
+      -- Load timezone if provided
+      mTz <- case mTzName of
+        Nothing -> pure Nothing
+        Just tzName -> liftIO $ loadTimezone tzName
+
       -- Assemble context
       calendar <- getTodaysCalendarEvents
       quarantined <- getActivitiesByStatus Activity.Quarantined 100
       surfaced <- getActivitiesByStatus Activity.Surfaced 100
       needsReview <- getActivitiesByStatus Activity.NeedsReview 100
 
-      let systemPrompt = buildChatPrompt calendar quarantined surfaced needsReview
+      let systemPrompt = buildChatPrompt mTz calendar quarantined surfaced needsReview
       -- Build conversation for Claude (include history)
       let conversationPrompt = buildConversationPrompt messages
 
@@ -303,8 +334,8 @@ buildConversationPrompt msgs = T.unlines
           r -> r
   ]
 
-buildChatPrompt :: [Activity] -> [Activity] -> [Activity] -> [Activity] -> Text
-buildChatPrompt calendar quarantined surfaced needsReview = T.unlines
+buildChatPrompt :: Maybe TZ -> [Activity] -> [Activity] -> [Activity] -> [Activity] -> Text
+buildChatPrompt mTz calendar quarantined surfaced needsReview = T.unlines
   [ "You are Wisp, a personal assistant. You present options, never demands."
   , ""
   , "## Response Format"
@@ -340,6 +371,7 @@ buildChatPrompt calendar quarantined surfaced needsReview = T.unlines
   , "- Present choices as options: \"You might want to...\" or \"Here are some options:\""
   , "- Never use imperatives like \"You should\" or \"Don't forget\""
   , "- Be concise and helpful"
+  , "- All times shown are in the user's local timezone"
   , ""
   , "## For Quarantined Items"
   , "When helping with quarantined items, present 2-3 classification options:"
@@ -359,7 +391,7 @@ buildChatPrompt calendar quarantined surfaced needsReview = T.unlines
   , formatActivitiesForPrompt needsReview
   , ""
   , "### Today's Calendar"
-  , formatCalendarForPrompt calendar
+  , formatCalendarForPrompt mTz calendar
   ]
 
 formatActivitiesForPrompt :: [Activity] -> Text
@@ -371,12 +403,30 @@ formatActivitiesForPrompt activities = T.unlines $ map formatOne (take 20 activi
       <> maybe "" (\s -> " (from: " <> s <> ")") (activitySenderEmail a)
       <> maybe "" (\s -> " - " <> s) (activitySummary a)
 
-formatCalendarForPrompt :: [Activity] -> Text
-formatCalendarForPrompt [] = "No events today."
-formatCalendarForPrompt events = T.unlines $ map formatOne events
+formatCalendarForPrompt :: Maybe TZ -> [Activity] -> Text
+formatCalendarForPrompt _ [] = "No events today."
+formatCalendarForPrompt mTz events = T.unlines $ map formatOne events
   where
     formatOne a = "- [" <> unEntityId (activityId a) <> "] "
+      <> formatEventTime mTz (activityStartsAt a) (activityEndsAt a)
       <> fromMaybe "(no title)" (activityTitle a)
+
+    formatEventTime :: Maybe TZ -> Maybe UTCTime -> Maybe UTCTime -> Text
+    formatEventTime _ Nothing _ = ""
+    formatEventTime mtz (Just start) mEnd =
+      let startStr = formatTimeShort mtz start
+          endStr = maybe "" (\e -> "-" <> formatTimeShort mtz e) mEnd
+      in startStr <> endStr <> " "
+
+    formatTimeShort :: Maybe TZ -> UTCTime -> Text
+    formatTimeShort Nothing utc =
+      -- Extract HH:MM from UTC string
+      let s = T.pack $ show utc
+      in T.take 5 $ T.drop 11 s
+    formatTimeShort (Just tz) utc =
+      let local = utcToLocalTimeTZ tz utc
+          s = T.pack $ show local
+      in T.take 5 $ T.drop 11 s
 
 parseLLMResponse :: Text -> Either Text LLMResponse
 parseLLMResponse raw =
