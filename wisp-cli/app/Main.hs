@@ -125,7 +125,14 @@ runInbox = do
   response <- httpLbs req manager
   case decode (responseBody response) of
     Just (Object obj) -> do
-      -- Show quarantined items first (need decision)
+      -- Show today's calendar first
+      case KM.lookup "calendar" obj of
+        Just (Array items) | not (null items) -> do
+          TIO.putStrLn "📅 Today's Schedule:"
+          showCalendarWithGaps (toList items)
+          TIO.putStrLn ""
+        _ -> return ()
+      -- Show quarantined items (need decision)
       case KM.lookup "quarantined" obj of
         Just (Array items) | not (null items) -> do
           TIO.putStrLn "⚠️  Quarantined (needs review):"
@@ -146,11 +153,76 @@ runInbox = do
           mapM_ (showActivityBrief "  ") (toList items)
           TIO.putStrLn ""
         _ -> return ()
-      -- Show total
-      case KM.lookup "total" obj of
-        Just (Number n) | n == 0 -> TIO.putStrLn "No activities requiring attention."
-        _ -> return ()
+      -- Show summary if nothing to show
+      let hasQuarantined = case KM.lookup "quarantined" obj of
+            Just (Array items) -> not (null items)
+            _ -> False
+      let hasSurfaced = case KM.lookup "surfaced" obj of
+            Just (Array items) -> not (null items)
+            _ -> False
+      let hasCalendar = case KM.lookup "calendar" obj of
+            Just (Array items) -> not (null items)
+            _ -> False
+      when (not hasQuarantined && not hasSurfaced && not hasCalendar) $
+        TIO.putStrLn "No activities requiring attention."
     _ -> TIO.putStrLn "Failed to fetch inbox"
+
+-- Show calendar events with gaps highlighted
+showCalendarWithGaps :: [Value] -> IO ()
+showCalendarWithGaps [] = TIO.putStrLn "  No events today."
+showCalendarWithGaps events = do
+  -- Sort events by start time and show with gaps
+  let sorted = sortByStartTime events
+  showEventsWithGaps Nothing sorted
+  where
+    sortByStartTime = id  -- Events already sorted by server
+
+    showEventsWithGaps :: Maybe Text -> [Value] -> IO ()
+    showEventsWithGaps _ [] = return ()
+    showEventsWithGaps lastEnd (e:es) = do
+      let mStart = getStartTime e
+      let mEnd = getEndTime e
+      -- Show gap if there's time between events
+      case (lastEnd, mStart) of
+        (Just end, Just start) | end < start -> do
+          let gap = "  ⬜ " <> formatTimeRange end start <> " (free)"
+          TIO.putStrLn gap
+        _ -> return ()
+      -- Show the event
+      showCalendarEvent e
+      showEventsWithGaps mEnd es
+
+    getStartTime (Object o) = case KM.lookup "starts_at" o of
+      Just (String s) -> Just s
+      _ -> Nothing
+    getStartTime _ = Nothing
+
+    getEndTime (Object o) = case KM.lookup "ends_at" o of
+      Just (String s) -> Just s
+      _ -> Nothing
+    getEndTime _ = Nothing
+
+    formatTimeRange start end =
+      extractTime start <> " - " <> extractTime end
+
+    extractTime t = T.take 5 $ T.drop 11 $ T.takeWhile (/= '.') t  -- "HH:MM"
+
+-- Show a calendar event
+showCalendarEvent :: Value -> IO ()
+showCalendarEvent (Object e) = do
+  let title = case KM.lookup "title" e of
+        Just (String s) -> s
+        _ -> "(no title)"
+  let timeStr = case KM.lookup "starts_at" e of
+        Just (String s) -> extractTime s
+        _ -> "??:??"
+  let endStr = case KM.lookup "ends_at" e of
+        Just (String s) -> " - " <> extractTime s
+        _ -> ""
+  TIO.putStrLn $ "  📅 " <> timeStr <> endStr <> " " <> title
+  where
+    extractTime t = T.take 5 $ T.drop 11 $ T.takeWhile (/= '.') t
+showCalendarEvent _ = return ()
 
 runReview :: IO ()
 runReview = do

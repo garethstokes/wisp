@@ -308,7 +308,7 @@ After each chat, extract and store as activity with `source: 'conversation'`:
 ```
 wisp auth          # Start OAuth flow (opens browser)
 wisp status        # Quick overview: pending items, quarantine count, today's events
-wisp today         # Today's schedule with gaps highlighted
+wisp inbox         # Activities needing attention + today's schedule with gaps
 wisp chat "..."    # Ask a question (also supports interactive mode)
 wisp quarantine    # List quarantined items with context
 wisp approve <id>  # Approve a quarantined item
@@ -464,7 +464,7 @@ confidence_threshold = 0.5
 15. Receipt logging
 
 ### Phase 5: CLI Completeness
-16. `wisp today`
+16. `wisp inbox` (with schedule gaps)
 17. `wisp quarantine`, `wisp approve`, `wisp dismiss`
 18. `wisp people`, `wisp person <id>`
 19. `wisp activity <id>`, `wisp logs`

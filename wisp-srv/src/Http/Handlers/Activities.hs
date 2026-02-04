@@ -20,7 +20,7 @@ import Web.Scotty.Trans (ActionT, json, status, pathParam)
 import App.Monad (Env)
 import Domain.Id (EntityId(..))
 import Domain.Activity (Activity(..), ActivityStatus(..))
-import Infra.Db.Activity (getActivitiesByStatus, countActivitiesByStatus, getActivity, getActivitiesForToday, updateActivityStatus)
+import Infra.Db.Activity (getActivitiesByStatus, countActivitiesByStatus, getActivity, getActivitiesForToday, getTodaysCalendarEvents, updateActivityStatus)
 import Infra.Db.Receipt (getReceiptsForActivity)
 import Services.Scheduler (runPollCycle)
 
@@ -102,10 +102,11 @@ getActivityLogs = do
         , "count" .= length receipts
         ]
 
--- GET /inbox - Activities requiring attention
+-- GET /inbox - Activities requiring attention + today's schedule
 getInbox :: ActionT (ReaderT Env IO) ()
 getInbox = do
   activities <- lift $ getActivitiesForToday 50
+  calendar <- lift $ getTodaysCalendarEvents
   -- Group by status for the CLI
   let surfaced = [a | a <- activities, activityStatus a == Surfaced]
   let quarantined = [a | a <- activities, activityStatus a == Quarantined]
@@ -114,6 +115,7 @@ getInbox = do
     [ "surfaced" .= map activityToJson surfaced
     , "quarantined" .= map activityToJson quarantined
     , "high_urgency" .= map activityToJson highUrgency
+    , "calendar" .= map activityToJson calendar
     , "total" .= length activities
     ]
 

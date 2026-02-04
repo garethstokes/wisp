@@ -98,7 +98,8 @@ Used to fetch activities by filter criteria.
 {
   "status": "Text | null",
   "limit": "Int | null (default 20)",
-  "since": "DateTime | null"
+  "since": "DateTime | null",
+  "before": "DateTime | null"
 }
 ```
 

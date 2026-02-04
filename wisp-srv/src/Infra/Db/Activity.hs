@@ -6,6 +6,7 @@ module Infra.Db.Activity
   , activityExistsForAccount
   , getActivity
   , getActivitiesByStatus
+  , getActivitiesFiltered
   , countActivitiesByStatus
   , getActivitiesForToday
   , getRecentActivities
@@ -20,9 +21,11 @@ import Control.Monad.IO.Class (liftIO)
 import Data.Aeson ()
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Encoding (encodeUtf8)
+import Data.Time (UTCTime)
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.FromRow
-import Database.PostgreSQL.Simple.Types (PGArray(..))
+import Database.PostgreSQL.Simple.Types (PGArray(..), Query(..))
 import Domain.Id (EntityId(..), newEntityId)
 import Domain.Activity
 import Domain.Classification (Classification(..), ActivityType(..), Urgency(..))
@@ -213,6 +216,45 @@ getActivitiesByStatus st limit = do
     \order by created_at desc limit ?"
     (statusText, limit)
   pure $ map unDbActivity results
+
+-- Get activities with flexible date filters
+getActivitiesFiltered :: Maybe ActivityStatus -> Maybe UTCTime -> Maybe UTCTime -> Int -> App [Activity]
+getActivitiesFiltered mStatus mSince mBefore limit = do
+  conn <- getConn
+  let baseQuery = "select id, account_id, source, source_id, raw, status, title, summary, \
+                  \sender_email, starts_at, ends_at, created_at, \
+                  \personas, activity_type, urgency, autonomy_tier, confidence, person_id \
+                  \from activities where 1=1"
+      statusClause = case mStatus of
+        Just st -> " and status = '" <> statusToText st <> "'"
+        Nothing -> ""
+      sinceClause = case mSince of
+        Just _ -> " and created_at >= ?"
+        Nothing -> ""
+      beforeClause = case mBefore of
+        Just _ -> " and created_at < ?"
+        Nothing -> ""
+      orderClause = " order by created_at desc limit ?"
+      fullQuery = baseQuery <> statusClause <> sinceClause <> beforeClause <> orderClause
+  -- Build params based on which filters are present
+  results <- case (mSince, mBefore) of
+    (Just since, Just before) ->
+      liftIO $ query conn (Query $ encodeUtf8 fullQuery) (since, before, limit)
+    (Just since, Nothing) ->
+      liftIO $ query conn (Query $ encodeUtf8 fullQuery) (since, limit)
+    (Nothing, Just before) ->
+      liftIO $ query conn (Query $ encodeUtf8 fullQuery) (before, limit)
+    (Nothing, Nothing) ->
+      liftIO $ query conn (Query $ encodeUtf8 fullQuery) (Only limit)
+  pure $ map unDbActivity results
+  where
+    statusToText :: ActivityStatus -> Text
+    statusToText Pending = "pending"
+    statusToText NeedsReview = "needs_review"
+    statusToText Quarantined = "quarantined"
+    statusToText Processed = "processed"
+    statusToText Surfaced = "surfaced"
+    statusToText Archived = "archived"
 
 -- Count activities by status (no limit)
 countActivitiesByStatus :: ActivityStatus -> App Int

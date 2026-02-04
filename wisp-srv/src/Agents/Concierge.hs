@@ -33,7 +33,7 @@ import Domain.Classification (Classification(..))
 import Domain.Id (EntityId(..), unEntityId)
 import Domain.Person (Person(..))
 import Domain.Receipt (NewReceipt(..), ReceiptAction(..))
-import Infra.Db.Activity (getActivitiesByStatus, updateActivityClassification, updateActivityStatus, getActivity, insertConversation, getTodaysCalendarEvents, getRecentActivities)
+import Infra.Db.Activity (getActivitiesByStatus, getActivitiesFiltered, updateActivityClassification, updateActivityStatus, getActivity, insertConversation, getTodaysCalendarEvents, getRecentActivities)
 import Infra.Db.Person (searchPeople, getPersonByEmail)
 import Infra.Db.Receipt (insertReceipt)
 import Infra.Claude.Client (callClaudeWithSystem)
@@ -73,6 +73,7 @@ data ActivityFilter = ActivityFilter
   { filterStatus :: Maybe Text
   , filterLimit :: Maybe Int
   , filterSince :: Maybe UTCTime
+  , filterBefore :: Maybe UTCTime
   } deriving (Show, Eq, Generic)
 
 data PeopleFilter = PeopleFilter
@@ -124,6 +125,7 @@ instance FromJSON ActivityFilter where
     <$> v .:? "status"
     <*> v .:? "limit"
     <*> v .:? "since"
+    <*> v .:? "before"
 
 instance FromJSON PeopleFilter where
   parseJSON = withObject "PeopleFilter" $ \v -> PeopleFilter
@@ -173,14 +175,20 @@ executeToolCall (UpdateActivities ids updates) = do
 
 executeToolCall (QueryActivities filt) = do
   let limit = fromMaybe 20 (filterLimit filt)
-  activities <- case filterStatus filt of
-    Just "quarantined" -> getActivitiesByStatus Activity.Quarantined limit
-    Just "surfaced" -> getActivitiesByStatus Activity.Surfaced limit
-    Just "pending" -> getActivitiesByStatus Activity.Pending limit
-    Just "needs_review" -> getActivitiesByStatus Activity.NeedsReview limit
-    Just "processed" -> getActivitiesByStatus Activity.Processed limit
-    Just "archived" -> getActivitiesByStatus Activity.Archived limit
-    _ -> getRecentActivities limit
+  let mStatus = case filterStatus filt of
+        Just "quarantined" -> Just Activity.Quarantined
+        Just "surfaced" -> Just Activity.Surfaced
+        Just "pending" -> Just Activity.Pending
+        Just "needs_review" -> Just Activity.NeedsReview
+        Just "processed" -> Just Activity.Processed
+        Just "archived" -> Just Activity.Archived
+        _ -> Nothing
+  -- Use filtered query if date filters present, otherwise simple status query
+  activities <- case (filterSince filt, filterBefore filt) of
+    (Nothing, Nothing) -> case mStatus of
+      Just st -> getActivitiesByStatus st limit
+      Nothing -> getRecentActivities limit
+    _ -> getActivitiesFiltered mStatus (filterSince filt) (filterBefore filt) limit
 
   pure $ ToolSuccess $ object
     [ "activities" .= map activityToJson activities
@@ -292,8 +300,10 @@ buildChatPrompt calendar quarantined surfaced needsReview = T.unlines
   , "Status values: pending, needs_review, quarantined, surfaced, processed, archived"
   , ""
   , "### query_activities - Fetch activities"
+  , "Filters: status, limit, since (ISO8601), before (ISO8601)"
   , "```json"
   , "{\"tool\": \"query_activities\", \"status\": \"quarantined\", \"limit\": 10}"
+  , "{\"tool\": \"query_activities\", \"before\": \"2024-12-01T00:00:00Z\", \"limit\": 50}"
   , "```"
   , ""
   , "### query_people - Look up contacts"
@@ -345,12 +355,32 @@ formatCalendarForPrompt events = T.unlines $ map formatOne events
 
 parseChatResponse :: Text -> Either Text ChatResponse
 parseChatResponse raw =
-  let stripped = stripCodeBlock raw
-      jsonBytes = BL.fromStrict (encodeUtf8 stripped)
+  let extracted = extractJson raw
+      jsonBytes = BL.fromStrict (encodeUtf8 extracted)
   in case decode jsonBytes of
     Just resp -> Right resp
     Nothing -> Left $ "Failed to parse chat response: " <> T.take 200 raw
 
+-- Extract JSON object from text that may contain prose before/after
+-- Looks for outermost { } pair, handling nested braces
+extractJson :: Text -> Text
+extractJson t =
+  let stripped = stripCodeBlock t
+      -- Find the first { and last }
+      startIdx = T.findIndex (== '{') stripped
+      endIdx = findLastIndex (== '}') stripped
+  in case (startIdx, endIdx) of
+    (Just s, Just e) | e >= s -> T.drop s $ T.take (e + 1) stripped
+    _ -> stripped  -- Fall back to original if no braces found
+
+-- Find the last index of a character
+findLastIndex :: (Char -> Bool) -> Text -> Maybe Int
+findLastIndex p t =
+  let len = T.length t
+      indices = [i | i <- [0..len-1], p (T.index t i)]
+  in if null indices then Nothing else Just (last indices)
+
+-- Strip ```json ... ``` wrapper if present
 stripCodeBlock :: Text -> Text
 stripCodeBlock t =
   let lines' = T.lines t
