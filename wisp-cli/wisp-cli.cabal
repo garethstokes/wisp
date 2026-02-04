@@ -12,6 +12,9 @@ common warnings
 executable wisp
     import:           warnings
     main-is:          Main.hs
+    other-modules:
+        Config
+        Time
     hs-source-dirs:   app
     default-language: GHC2021
     default-extensions:
@@ -28,4 +31,6 @@ executable wisp
         http-client-tls,
         optparse-applicative,
         process,
-        time
+        time,
+        tz,
+        yaml

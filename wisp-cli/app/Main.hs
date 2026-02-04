@@ -579,7 +579,7 @@ showAgent (Object a) = do
         Just (String s) -> s
         _ -> ""
   let getImpl = case KM.lookup "implemented" a of
-        Just (Bool True) -> " [implemented]"
+        Just (Bool True) -> ""
         _ -> " [not implemented]"
   let getTools = case KM.lookup "tools" a of
         Just (Array ts) -> [n | Object t <- toList ts, Just (String n) <- [KM.lookup "name" t]]
