@@ -30,7 +30,7 @@ getAgent aid = case [a | a <- allAgents, agentId a == aid] of
 -- timezone: Optional IANA timezone for converting dates to local time in agent context
 dispatchChat :: Text -> [ChatMessage] -> Maybe Text -> App (Either Text ChatResponse)
 dispatchChat "wisp/concierge" msgs tz = Concierge.handleChat msgs tz
-dispatchChat "wisp/scheduler" _ _ = pure $ Left "Agent 'wisp/scheduler' not yet implemented"
+dispatchChat "wisp/scheduler" msgs tz = Scheduler.handleChat msgs tz
 dispatchChat "wisp/housekeeper" _ _ = pure $ Left "Agent 'wisp/housekeeper' not yet implemented"
 dispatchChat "wisp/insights" _ _ = pure $ Left "Agent 'wisp/insights' not yet implemented"
 dispatchChat agent _ _ = pure $ Left $ "Unknown agent: " <> agent
