@@ -12,6 +12,8 @@ module Agents.Concierge
   , ToolResult(..)
     -- Dispatcher
   , executeToolCall
+    -- Agent metadata
+  , agentInfo
   ) where
 
 import Control.Monad (forM, forM_, void)
@@ -38,6 +40,7 @@ import Infra.Db.Person (searchPeople, getPersonByEmail)
 import Infra.Db.Receipt (insertReceipt)
 import Infra.Claude.Client (callClaudeWithSystem)
 import Agents.Concierge.Classifier (classifyActivity)
+import Domain.Agent (AgentInfo(..), ToolInfo(..), ToolType(..))
 import Services.PeopleResolver (resolvePersonForActivity)
 import Services.Router (routeActivity)
 
@@ -464,3 +467,20 @@ statusToReceiptAction Activity.Quarantined = RoutedToQuarantined
 statusToReceiptAction Activity.Surfaced = RoutedToSurfaced
 statusToReceiptAction Activity.Processed = RoutedToProcessed
 statusToReceiptAction Activity.Archived = RoutedToArchived
+
+--------------------------------------------------------------------------------
+-- Agent Metadata
+--------------------------------------------------------------------------------
+
+agentInfo :: AgentInfo
+agentInfo = AgentInfo
+  { agentId = "wisp/concierge"
+  , agentDescription = "Intake, classification, routing, quarantine"
+  , agentTools =
+      [ ToolInfo "update_activities" Decision
+      , ToolInfo "query_activities" Decision
+      , ToolInfo "query_people" Decision
+      ]
+  , agentWorkflows = ["classify-pending", "route-activity", "quarantine-interview"]
+  , agentImplemented = True
+  }

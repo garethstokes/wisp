@@ -1,0 +1,19 @@
+module Agents.ConciergeAgentSpec where
+
+import Test.Hspec
+import Agents.Concierge (agentInfo)
+import Domain.Agent
+
+spec :: Spec
+spec = describe "Concierge" $ do
+  describe "agentInfo" $ do
+    it "has correct id" $ do
+      agentId agentInfo `shouldBe` "wisp/concierge"
+
+    it "is marked as implemented" $ do
+      agentImplemented agentInfo `shouldBe` True
+
+    it "has expected tools" $ do
+      length (agentTools agentInfo) `shouldBe` 3
+      map toolName (agentTools agentInfo) `shouldBe`
+        ["update_activities", "query_activities", "query_people"]

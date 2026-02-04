@@ -115,6 +115,7 @@ test-suite wisp-srv-test
         Agents.Concierge
         Agents.Concierge.Classifier
         Agents.ConciergeSpec
+        Agents.ConciergeAgentSpec
         Agents.Concierge.ClassifierSpec
         Domain.Account
         Domain.AccountSpec
