@@ -4,8 +4,9 @@ module Http.Routes
 
 import Control.Monad.Reader (ReaderT)
 import Web.Scotty.Trans (ScottyT, get, post)
-import Http.Handlers.Health (getHealth)
+import Http.Handlers.Agents (getAgents)
 import Http.Handlers.Auth (getGoogleAuth, getGoogleCallback, getAuthStatus)
+import Http.Handlers.Health (getHealth)
 import Http.Handlers.Activities (getActivities, getActivityStats, getActivityById, getActivityLogs, getInbox, getReview, approveActivity, dismissActivity, triggerPoll)
 import Http.Handlers.Chat (postChat)
 import Http.Handlers.People (getPeople, getPersonById)
@@ -16,6 +17,9 @@ routes :: ScottyT (ReaderT Env IO) ()
 routes = do
   -- Health
   get "/health" getHealth
+
+  -- Agents
+  get "/agents" getAgents
 
   -- Auth
   get "/auth/google" getGoogleAuth

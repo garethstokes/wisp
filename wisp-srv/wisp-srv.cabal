@@ -46,6 +46,7 @@ executable wisp-srv
         Domain.Receipt
         Domain.Schema
         Http.Handlers.Activities
+        Http.Handlers.Agents
         Http.Handlers.Auth
         Http.Handlers.Chat
         Http.Handlers.Health
@@ -149,6 +150,7 @@ test-suite wisp-srv-test
         App.Monad
         App.Env
         Http.Handlers.Activities
+        Http.Handlers.Agents
         Http.Handlers.Auth
         Http.Handlers.Chat
         Http.Handlers.Health
