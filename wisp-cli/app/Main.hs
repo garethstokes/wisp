@@ -27,9 +27,22 @@ data Command
   | People
   | Activity Text
   | Logs Text
-  | Chat Text
+  | Chat ChatOptions
+  | Agents
+  | Sessions SessionsOptions
   | Help
   deriving (Show)
+
+data ChatOptions = ChatOptions
+  { chatOptAgent   :: Text
+  , chatOptMessage :: Maybe Text
+  , chatOptSession :: Text
+  , chatOptNew     :: Bool
+  } deriving (Show)
+
+data SessionsOptions = SessionsOptions
+  { sessionsDelete :: Maybe Text
+  } deriving (Show)
 
 -- Parse commands
 commandParser :: Parser Command
@@ -41,7 +54,9 @@ commandParser = subparser
   <> command "logs" (info logsParser (progDesc "Show processing history for an activity"))
   <> command "approve" (info approveParser (progDesc "Move quarantined activity to surfaced"))
   <> command "dismiss" (info dismissParser (progDesc "Archive an activity"))
-  <> command "chat" (info chatParser (progDesc "Natural language queries and commands"))
+  <> command "chat" (info chatOptionsParser (progDesc "Chat with an agent"))
+  <> command "agents" (info (pure Agents) (progDesc "List available agents"))
+  <> command "sessions" (info sessionsParser (progDesc "Manage chat sessions"))
   <> command "people" (info (pure People) (progDesc "List contacts extracted from activities"))
   <> command "poll" (info (pure Poll) (progDesc "Fetch new emails and calendar events now"))
   <> command "classify" (info (pure Classify) (progDesc "Run classification on pending activities"))
@@ -52,8 +67,16 @@ commandParser = subparser
 logsParser :: Parser Command
 logsParser = Logs <$> strArgument (metavar "ID" <> help "Activity ID to show logs for")
 
-chatParser :: Parser Command
-chatParser = Chat <$> strArgument (metavar "MESSAGE" <> help "Message to send to Wisp")
+chatOptionsParser :: Parser Command
+chatOptionsParser = Chat <$> (ChatOptions
+  <$> strOption (long "agent" <> short 'a' <> metavar "AGENT" <> help "Agent path (e.g., wisp/concierge)")
+  <*> optional (strOption (long "message" <> short 'm' <> metavar "MSG" <> help "Message to send"))
+  <*> strOption (long "session" <> short 's' <> metavar "NAME" <> value "default" <> help "Session name")
+  <*> switch (long "new" <> help "Start fresh session"))
+
+sessionsParser :: Parser Command
+sessionsParser = Sessions <$> (SessionsOptions
+  <$> optional (strOption (long "delete" <> short 'd' <> metavar "NAME" <> help "Delete session")))
 
 activityParser :: Parser Command
 activityParser = Activity <$> strArgument (metavar "ID" <> help "Activity ID to show")
@@ -94,7 +117,9 @@ main = do
     People -> runPeople
     Activity aid -> runActivity aid
     Logs aid -> runLogs aid
-    Chat msg -> runChat msg
+    Chat chatOpts -> runChatWithOptions chatOpts
+    Agents -> runAgents
+    Sessions sessOpts -> runSessions sessOpts
     Help -> runHelp
 
 runHelp :: IO ()
@@ -441,24 +466,76 @@ showLogEntry (Object log') = do
     Nothing -> return ()
 showLogEntry _ = return ()
 
-runChat :: Text -> IO ()
-runChat msg = do
+runAgents :: IO ()
+runAgents = do
   manager <- newManager defaultManagerSettings
-  initialReq <- parseRequest $ baseUrl <> "/chat"
-  let reqBody = object ["message" .= msg]
-  let req = initialReq
-        { method = "POST"
-        , requestHeaders = [("Content-Type", "application/json")]
-        , requestBody = RequestBodyLBS (encode reqBody)
-        }
+  req <- parseRequest $ baseUrl <> "/agents"
   response <- httpLbs req manager
   case decode (responseBody response) of
-    Just (Object obj) -> case KM.lookup "message" obj of
-      Just (String s) -> TIO.putStrLn s
-      _ -> case KM.lookup "error" obj of
-        Just (String err) -> TIO.putStrLn $ "Error: " <> err
-        _ -> TIO.putStrLn "Unexpected response"
-    _ -> TIO.putStrLn "Failed to parse response"
+    Just (Object obj) -> case KM.lookup "agents" obj of
+      Just (Array agents) -> do
+        TIO.putStrLn "Available Agents"
+        TIO.putStrLn "================"
+        TIO.putStrLn ""
+        mapM_ showAgent (toList agents)
+      _ -> TIO.putStrLn "No agents found"
+    _ -> TIO.putStrLn "Failed to fetch agents"
+
+showAgent :: Value -> IO ()
+showAgent (Object a) = do
+  let getId = case KM.lookup "id" a of
+        Just (String s) -> s
+        _ -> "?"
+  let getDesc = case KM.lookup "description" a of
+        Just (String s) -> s
+        _ -> ""
+  let getImpl = case KM.lookup "implemented" a of
+        Just (Bool True) -> " [implemented]"
+        _ -> " [not implemented]"
+  let getTools = case KM.lookup "tools" a of
+        Just (Array ts) -> [n | Object t <- toList ts, Just (String n) <- [KM.lookup "name" t]]
+        _ -> []
+  let getWorkflows = case KM.lookup "workflows" a of
+        Just (Array ws) -> [w | String w <- toList ws]
+        _ -> []
+  TIO.putStrLn $ getId <> getImpl
+  TIO.putStrLn $ "  " <> getDesc
+  TIO.putStrLn $ "  Tools: " <> T.intercalate ", " getTools
+  TIO.putStrLn $ "  Workflows: " <> T.intercalate ", " getWorkflows
+  TIO.putStrLn ""
+showAgent _ = return ()
+
+runChatWithOptions :: ChatOptions -> IO ()
+runChatWithOptions chatOpts = do
+  let agent = chatOptAgent chatOpts
+  case chatOptMessage chatOpts of
+    Nothing -> TIO.putStrLn "Please provide a message with --message"
+    Just msg -> do
+      manager <- newManager defaultManagerSettings
+      initialReq <- parseRequest $ baseUrl <> "/chat"
+      -- For now, just send single message (session support in Task 10)
+      let reqBody = object
+            [ "agent" .= agent
+            , "messages" .= [object ["role" .= ("user" :: Text), "content" .= msg]]
+            ]
+      let req = initialReq
+            { method = "POST"
+            , requestHeaders = [("Content-Type", "application/json")]
+            , requestBody = RequestBodyLBS (encode reqBody)
+            }
+      response <- httpLbs req manager
+      case decode (responseBody response) of
+        Just (Object obj) -> case KM.lookup "message" obj of
+          Just (String s) -> TIO.putStrLn s
+          _ -> case KM.lookup "error" obj of
+            Just (String err) -> TIO.putStrLn $ "Error: " <> err
+            _ -> TIO.putStrLn "Unexpected response"
+        _ -> TIO.putStrLn "Failed to parse response"
+
+runSessions :: SessionsOptions -> IO ()
+runSessions _opts = do
+  -- Placeholder for Task 10
+  TIO.putStrLn "Session management not yet implemented. Coming soon!"
 
 runClassify :: IO ()
 runClassify = do
