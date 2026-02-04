@@ -29,6 +29,7 @@ executable wisp-srv
     other-modules:
         Agents.Concierge
         Agents.Concierge.Classifier
+        Agents.Dispatcher
         Agents.Housekeeper
         Agents.Insights
         Agents.Scheduler
@@ -120,6 +121,8 @@ test-suite wisp-srv-test
         Agents.ConciergeSpec
         Agents.ConciergeAgentSpec
         Agents.Concierge.ClassifierSpec
+        Agents.Dispatcher
+        Agents.DispatcherSpec
         Agents.Housekeeper
         Agents.Insights
         Agents.Scheduler
