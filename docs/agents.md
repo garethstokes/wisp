@@ -34,15 +34,19 @@ Intake, classification, routing, quarantine.
 
 ---
 
-### wisp/scheduler [NOT IMPLEMENTED]
+### wisp/scheduler [IMPLEMENTED]
 
-Calendar reasoning and communication drafts.
+Calendar reasoning, schedule queries, finding free time.
 
 **Deterministic flows:** (none)
 
 **Decision flows:**
-- `schedule-negotiation` - Negotiate meeting times
-- `draft-response` - Draft calendar-related responses
+- `schedule-query` - Query calendar events
+- `find-time` - Find available time slots
+
+**Tools:**
+- `query_calendar` (decision) - Get calendar events for date range
+- `find_free_slots` (decision) - Find available time slots
 
 ---
 

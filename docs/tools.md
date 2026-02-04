@@ -133,3 +133,54 @@ Used to look up contacts.
   "count": "Int"
 }
 ```
+
+### query_calendar (calendar_tools)
+
+Type: decision
+
+Used by scheduler agent to query calendar events.
+
+**Input:**
+```json
+{
+  "days": "Int | null (default 7)",
+  "date": "Text | null (specific date ISO format)"
+}
+```
+
+**Output:**
+```json
+{
+  "events": [CalendarEvent],
+  "count": "Int"
+}
+```
+
+### find_free_slots (calendar_tools)
+
+Type: decision
+
+Used by scheduler agent to find available time.
+
+**Input:**
+```json
+{
+  "days": "Int | null (default 7)",
+  "duration_minutes": "Int | null (default 60)",
+  "start_hour": "Int | null (default 9)",
+  "end_hour": "Int | null (default 17)"
+}
+```
+
+**Output:**
+```json
+{
+  "free_slots": [TimeSlot],
+  "count": "Int",
+  "parameters": {
+    "days": "Int",
+    "duration_minutes": "Int",
+    "work_hours": "Text"
+  }
+}
+```
