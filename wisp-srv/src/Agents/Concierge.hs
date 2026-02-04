@@ -41,6 +41,8 @@ import Infra.Db.Receipt (insertReceipt)
 import Infra.Claude.Client (callClaudeWithSystem)
 import Agents.Concierge.Classifier (classifyActivity)
 import Domain.Agent (AgentInfo(..), ToolInfo(..), ToolType(..))
+import Domain.Chat (ChatMessage(..), ChatResponse)
+import qualified Domain.Chat as Chat
 import Services.PeopleResolver (resolvePersonForActivity)
 import Services.Router (routeActivity)
 
@@ -235,51 +237,71 @@ personToJson p = object
 -- Chat Handler
 --------------------------------------------------------------------------------
 
--- Response from LLM that may include a tool call
-data ChatResponse = ChatResponse
-  { responseMessage :: Text
-  , responseToolCall :: Maybe ConciergeToolCall
+-- Response from LLM that may include a tool call (internal type)
+data LLMResponse = LLMResponse
+  { llmMessage :: Text
+  , llmToolCall :: Maybe ConciergeToolCall
   } deriving (Show, Eq)
 
-instance FromJSON ChatResponse where
-  parseJSON = withObject "ChatResponse" $ \v -> ChatResponse
+instance FromJSON LLMResponse where
+  parseJSON = withObject "LLMResponse" $ \v -> LLMResponse
     <$> v .: "message"
     <*> v .:? "tool_call"
 
-handleChat :: Text -> App (Either Text Text)
-handleChat query = do
-  -- Assemble context
-  calendar <- getTodaysCalendarEvents
-  quarantined <- getActivitiesByStatus Activity.Quarantined 100
-  surfaced <- getActivitiesByStatus Activity.Surfaced 100
-  needsReview <- getActivitiesByStatus Activity.NeedsReview 100
+handleChat :: [ChatMessage] -> App (Either Text ChatResponse)
+handleChat messages = do
+  -- Get the last user message
+  let userMessages = [m | m <- messages, messageRole m == "user"]
+  case userMessages of
+    [] -> pure $ Left "No user message provided"
+    _ -> do
+      let query = messageContent (last userMessages)
+      -- Assemble context
+      calendar <- getTodaysCalendarEvents
+      quarantined <- getActivitiesByStatus Activity.Quarantined 100
+      surfaced <- getActivitiesByStatus Activity.Surfaced 100
+      needsReview <- getActivitiesByStatus Activity.NeedsReview 100
 
-  let systemPrompt = buildChatPrompt calendar quarantined surfaced needsReview
+      let systemPrompt = buildChatPrompt calendar quarantined surfaced needsReview
+      -- Build conversation for Claude (include history)
+      let conversationPrompt = buildConversationPrompt messages
 
-  claudeCfg <- asks (claude . config)
-  result <- liftIO $ callClaudeWithSystem
-    (apiKey claudeCfg)
-    (model claudeCfg)
-    systemPrompt
-    query
+      claudeCfg <- asks (claude . config)
+      result <- liftIO $ callClaudeWithSystem
+        (apiKey claudeCfg)
+        (model claudeCfg)
+        systemPrompt
+        conversationPrompt
 
-  case result of
-    Left err -> pure $ Left err
-    Right response -> do
-      -- Log the conversation
-      _ <- insertConversation query response
-      -- Parse response
-      case parseChatResponse response of
+      case result of
         Left err -> pure $ Left err
-        Right chatResp -> do
-          -- Execute tool call if present
-          case responseToolCall chatResp of
-            Nothing -> pure $ Right (responseMessage chatResp)
-            Just toolCall -> do
-              toolResult <- executeToolCall toolCall
-              case toolResult of
-                ToolSuccess _ -> pure $ Right (responseMessage chatResp)
-                ToolError err -> pure $ Left err
+        Right response -> do
+          -- Log the conversation
+          _ <- insertConversation query response
+          -- Parse response
+          case parseLLMResponse response of
+            Left err -> pure $ Left err
+            Right llmResp -> do
+              -- Execute tool call if present
+              case llmToolCall llmResp of
+                Nothing -> pure $ Right $ Chat.ChatResponse (llmMessage llmResp) Nothing
+                Just toolCall -> do
+                  toolResult <- executeToolCall toolCall
+                  case toolResult of
+                    ToolSuccess _ -> pure $ Right $ Chat.ChatResponse (llmMessage llmResp) Nothing
+                    ToolError err -> pure $ Left err
+
+-- Build conversation string from message history
+buildConversationPrompt :: [ChatMessage] -> Text
+buildConversationPrompt msgs = T.unlines
+  [ role <> ": " <> messageContent m
+  | m <- msgs
+  , let role = case messageRole m of
+          "user" -> "User"
+          "assistant" -> "Assistant"
+          "tool" -> "Tool Result"
+          r -> r
+  ]
 
 buildChatPrompt :: [Activity] -> [Activity] -> [Activity] -> [Activity] -> Text
 buildChatPrompt calendar quarantined surfaced needsReview = T.unlines
@@ -356,8 +378,8 @@ formatCalendarForPrompt events = T.unlines $ map formatOne events
     formatOne a = "- [" <> unEntityId (activityId a) <> "] "
       <> fromMaybe "(no title)" (activityTitle a)
 
-parseChatResponse :: Text -> Either Text ChatResponse
-parseChatResponse raw =
+parseLLMResponse :: Text -> Either Text LLMResponse
+parseLLMResponse raw =
   let extracted = extractJson raw
       jsonBytes = BL.fromStrict (encodeUtf8 extracted)
   in case decode jsonBytes of
