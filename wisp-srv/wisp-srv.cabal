@@ -29,6 +29,9 @@ executable wisp-srv
     other-modules:
         Agents.Concierge
         Agents.Concierge.Classifier
+        Agents.Housekeeper
+        Agents.Insights
+        Agents.Scheduler
         App.Config
         App.Monad
         App.Env
@@ -117,6 +120,9 @@ test-suite wisp-srv-test
         Agents.ConciergeSpec
         Agents.ConciergeAgentSpec
         Agents.Concierge.ClassifierSpec
+        Agents.Housekeeper
+        Agents.Insights
+        Agents.Scheduler
         Domain.Account
         Domain.AccountSpec
         Domain.Activity
