@@ -2,25 +2,25 @@
 module Main where
 
 import Control.Concurrent (threadDelay)
-import Control.Monad (when, forM_)
-import Data.Aeson (Value(..), FromJSON(..), ToJSON(..), decode, encode, object, withObject, (.=), (.:), (.:?))
+import Control.Monad (forM_, when)
+import Data.Aeson (FromJSON (..), ToJSON (..), Value (..), decode, encode, object, withObject, (.:), (.:?), (.=))
+import Data.Aeson.KeyMap qualified as KM
+import Data.ByteString.Lazy qualified as BL
 import Data.Foldable (toList)
 import Data.List (isSuffixOf)
 import Data.String (fromString)
 import Data.Text (Text, pack, unpack)
-import qualified Data.Text as T
-import qualified Data.Aeson.KeyMap as KM
-import qualified Data.ByteString.Lazy as BL
-import qualified Data.Text.IO as TIO
-import Data.Time (getCurrentTime, UTCTime)
-import Data.Time.Format.ISO8601 (iso8601Show, iso8601ParseM)
+import Data.Text qualified as T
+import Data.Text.IO qualified as TIO
+import Data.Time (UTCTime, getCurrentTime)
+import Data.Time.Format.ISO8601 (iso8601ParseM, iso8601Show)
 import Network.HTTP.Client
 import Options.Applicative
-import System.Directory (createDirectoryIfMissing, doesFileExist, listDirectory, removeFile, getHomeDirectory)
+import System.Directory (createDirectoryIfMissing, doesFileExist, getHomeDirectory, listDirectory, removeFile)
 import System.FilePath ((</>))
 import System.Process (callCommand)
 
-import Config (CliConfig(..), loadCliConfig)
+import Config (CliConfig (..), loadCliConfig)
 import Time (TZ, loadTimezone, utcToLocal)
 
 -- CLI Command types
@@ -43,49 +43,58 @@ data Command
   deriving (Show)
 
 data ChatOptions = ChatOptions
-  { chatOptAgent   :: Text
+  { chatOptAgent :: Text
   , chatOptMessage :: Maybe Text
   , chatOptSession :: Text
-  , chatOptNew     :: Bool
-  } deriving (Show)
+  , chatOptNew :: Bool
+  }
+  deriving (Show)
 
 data SessionsOptions = SessionsOptions
   { sessionsDelete :: Maybe Text
-  } deriving (Show)
+  }
+  deriving (Show)
 
 -- Parse commands
 commandParser :: Parser Command
-commandParser = subparser
-  ( command "status" (info (pure Status) (progDesc "Server status and activity counts"))
-  <> command "inbox" (info (pure Inbox) (progDesc "Activities needing attention (quarantined, surfaced)"))
-  <> command "review" (info (pure Review) (progDesc "Activities needing review (tier 3 - uncertain classification)"))
-  <> command "activity" (info activityParser (progDesc "Show full details for an activity"))
-  <> command "logs" (info logsParser (progDesc "Show processing history for an activity"))
-  <> command "approve" (info approveParser (progDesc "Move quarantined activity to surfaced"))
-  <> command "dismiss" (info dismissParser (progDesc "Archive an activity"))
-  <> command "chat" (info chatOptionsParser (progDesc "Chat with an agent"))
-  <> command "agents" (info (pure Agents) (progDesc "List available agents"))
-  <> command "sessions" (info sessionsParser (progDesc "Manage chat sessions"))
-  <> command "people" (info (pure People) (progDesc "List contacts extracted from activities"))
-  <> command "poll" (info (pure Poll) (progDesc "Fetch new emails and calendar events now"))
-  <> command "classify" (info (pure Classify) (progDesc "Run classification on pending activities"))
-  <> command "auth" (info (pure Auth) (progDesc "Add a Google account via OAuth"))
-  <> command "help" (info (pure Help) (progDesc "Show this help"))
-  )
+commandParser =
+  subparser
+    ( command "status" (info (pure Status) (progDesc "Server status and activity counts"))
+        <> command "inbox" (info (pure Inbox) (progDesc "Activities needing attention (quarantined, surfaced)"))
+        <> command "review" (info (pure Review) (progDesc "Activities needing review (tier 3 - uncertain classification)"))
+        <> command "activity" (info activityParser (progDesc "Show full details for an activity"))
+        <> command "logs" (info logsParser (progDesc "Show processing history for an activity"))
+        <> command "approve" (info approveParser (progDesc "Move quarantined activity to surfaced"))
+        <> command "dismiss" (info dismissParser (progDesc "Archive an activity"))
+        <> command "chat" (info chatOptionsParser (progDesc "Chat with an agent"))
+        <> command "agents" (info (pure Agents) (progDesc "List available agents"))
+        <> command "sessions" (info sessionsParser (progDesc "Manage chat sessions"))
+        <> command "people" (info (pure People) (progDesc "List contacts extracted from activities"))
+        <> command "poll" (info (pure Poll) (progDesc "Fetch new emails and calendar events now"))
+        <> command "classify" (info (pure Classify) (progDesc "Run classification on pending activities"))
+        <> command "auth" (info (pure Auth) (progDesc "Add a Google account via OAuth"))
+        <> command "help" (info (pure Help) (progDesc "Show this help"))
+    )
 
 logsParser :: Parser Command
 logsParser = Logs <$> strArgument (metavar "ID" <> help "Activity ID to show logs for")
 
 chatOptionsParser :: Parser Command
-chatOptionsParser = Chat <$> (ChatOptions
-  <$> strOption (long "agent" <> short 'a' <> metavar "AGENT" <> help "Agent path (e.g., wisp/concierge)")
-  <*> optional (strOption (long "message" <> short 'm' <> metavar "MSG" <> help "Message to send"))
-  <*> strOption (long "session" <> short 's' <> metavar "NAME" <> value "default" <> help "Session name")
-  <*> switch (long "new" <> help "Start fresh session"))
+chatOptionsParser =
+  Chat
+    <$> ( ChatOptions
+            <$> strOption (long "agent" <> short 'a' <> metavar "AGENT" <> help "Agent path (e.g., wisp/concierge)")
+            <*> optional (strOption (long "message" <> short 'm' <> metavar "MSG" <> help "Message to send"))
+            <*> strOption (long "session" <> short 's' <> metavar "NAME" <> value "default" <> help "Session name")
+            <*> switch (long "new" <> help "Start fresh session")
+        )
 
 sessionsParser :: Parser Command
-sessionsParser = Sessions <$> (SessionsOptions
-  <$> optional (strOption (long "delete" <> short 'd' <> metavar "NAME" <> help "Delete session")))
+sessionsParser =
+  Sessions
+    <$> ( SessionsOptions
+            <$> optional (strOption (long "delete" <> short 'd' <> metavar "NAME" <> help "Delete session"))
+        )
 
 activityParser :: Parser Command
 activityParser = Activity <$> strArgument (metavar "ID" <> help "Activity ID to show")
@@ -101,59 +110,68 @@ commandParserWithDefault :: Parser Command
 commandParserWithDefault = commandParser <|> pure Help
 
 opts :: ParserInfo Command
-opts = info (commandParserWithDefault <**> helper)
-  ( fullDesc
-  <> progDesc "Wisp personal assistant CLI"
-  <> header "wisp - your autonomy-preserving assistant"
-  )
+opts =
+  info
+    (commandParserWithDefault <**> helper)
+    ( fullDesc
+        <> progDesc "Wisp personal assistant CLI"
+        <> header "wisp - your autonomy-preserving assistant"
+    )
 
 -- Base URL for wisp-srv
 baseUrl :: String
-baseUrl = "http://127.0.0.1:8080"
+baseUrl = "http://127.0.0.1:5812"
 
 --------------------------------------------------------------------------------
 -- Session Management Types
 --------------------------------------------------------------------------------
 
 data Session = Session
-  { sessionAgent     :: Text
+  { sessionAgent :: Text
   , sessionCreatedAt :: Text
   , sessionUpdatedAt :: Text
-  , sessionMessages  :: [SessionMessage]
-  } deriving (Show)
+  , sessionMessages :: [SessionMessage]
+  }
+  deriving (Show)
 
 data SessionMessage = SessionMessage
-  { smRole     :: Text
-  , smContent  :: Text
+  { smRole :: Text
+  , smContent :: Text
   , smToolCall :: Maybe Value
-  } deriving (Show)
+  }
+  deriving (Show)
 
 instance FromJSON Session where
-  parseJSON = withObject "Session" $ \v -> Session
-    <$> v .: "agent"
-    <*> v .: "created_at"
-    <*> v .: "updated_at"
-    <*> v .: "messages"
+  parseJSON = withObject "Session" $ \v ->
+    Session
+      <$> v .: "agent"
+      <*> v .: "created_at"
+      <*> v .: "updated_at"
+      <*> v .: "messages"
 
 instance ToJSON Session where
-  toJSON s = object
-    [ "agent" .= sessionAgent s
-    , "created_at" .= sessionCreatedAt s
-    , "updated_at" .= sessionUpdatedAt s
-    , "messages" .= sessionMessages s
-    ]
+  toJSON s =
+    object
+      [ "agent" .= sessionAgent s
+      , "created_at" .= sessionCreatedAt s
+      , "updated_at" .= sessionUpdatedAt s
+      , "messages" .= sessionMessages s
+      ]
 
 instance FromJSON SessionMessage where
-  parseJSON = withObject "SessionMessage" $ \v -> SessionMessage
-    <$> v .: "role"
-    <*> v .: "content"
-    <*> v .:? "tool_call"
+  parseJSON = withObject "SessionMessage" $ \v ->
+    SessionMessage
+      <$> v .: "role"
+      <*> v .: "content"
+      <*> v .:? "tool_call"
 
 instance ToJSON SessionMessage where
-  toJSON m = object $
-    [ "role" .= smRole m
-    , "content" .= smContent m
-    ] ++ maybe [] (\tc -> ["tool_call" .= tc]) (smToolCall m)
+  toJSON m =
+    object $
+      [ "role" .= smRole m
+      , "content" .= smContent m
+      ]
+        ++ maybe [] (\tc -> ["tool_call" .= tc]) (smToolCall m)
 
 getSessionsDir :: IO FilePath
 getSessionsDir = do
@@ -294,36 +312,35 @@ showCalendarWithGaps tz events = do
   -- Sort events by start time and show with gaps
   let sorted = sortByStartTime events
   showEventsWithGaps Nothing sorted
-  where
-    sortByStartTime = id  -- Events already sorted by server
+ where
+  sortByStartTime = id -- Events already sorted by server
+  showEventsWithGaps :: Maybe Text -> [Value] -> IO ()
+  showEventsWithGaps _ [] = return ()
+  showEventsWithGaps lastEnd (e : es) = do
+    let mStart = getStartTime e
+    let mEnd = getEndTime e
+    -- Show gap if there's time between events
+    case (lastEnd, mStart) of
+      (Just end, Just start) | end < start -> do
+        let gap = "  ⬜ " <> formatTimeRange end start <> " (free)"
+        TIO.putStrLn gap
+      _ -> return ()
+    -- Show the event
+    showCalendarEvent tz e
+    showEventsWithGaps mEnd es
 
-    showEventsWithGaps :: Maybe Text -> [Value] -> IO ()
-    showEventsWithGaps _ [] = return ()
-    showEventsWithGaps lastEnd (e:es) = do
-      let mStart = getStartTime e
-      let mEnd = getEndTime e
-      -- Show gap if there's time between events
-      case (lastEnd, mStart) of
-        (Just end, Just start) | end < start -> do
-          let gap = "  ⬜ " <> formatTimeRange end start <> " (free)"
-          TIO.putStrLn gap
-        _ -> return ()
-      -- Show the event
-      showCalendarEvent tz e
-      showEventsWithGaps mEnd es
+  getStartTime (Object o) = case KM.lookup "starts_at" o of
+    Just (String s) -> Just s
+    _ -> Nothing
+  getStartTime _ = Nothing
 
-    getStartTime (Object o) = case KM.lookup "starts_at" o of
-      Just (String s) -> Just s
-      _ -> Nothing
-    getStartTime _ = Nothing
+  getEndTime (Object o) = case KM.lookup "ends_at" o of
+    Just (String s) -> Just s
+    _ -> Nothing
+  getEndTime _ = Nothing
 
-    getEndTime (Object o) = case KM.lookup "ends_at" o of
-      Just (String s) -> Just s
-      _ -> Nothing
-    getEndTime _ = Nothing
-
-    formatTimeRange start end =
-      formatTimeLocal tz start <> " - " <> formatTimeLocal tz end
+  formatTimeRange start end =
+    formatTimeLocal tz start <> " - " <> formatTimeLocal tz end
 
 -- Show a calendar event
 showCalendarEvent :: TZ -> Value -> IO ()
@@ -392,32 +409,41 @@ showActivityBrief _ _ _ = return ()
 formatTimeLocal :: TZ -> Text -> Text
 formatTimeLocal tz isoDate =
   case parseUtcTime isoDate of
-    Nothing -> T.take 5 $ T.drop 11 $ T.takeWhile (/= '.') isoDate  -- fallback to raw extraction
+    Nothing -> T.take 5 $ T.drop 11 $ T.takeWhile (/= '.') isoDate -- fallback to raw extraction
     Just utc ->
       let local = utcToLocal tz utc
-          timeStr = T.pack $ show local  -- "2026-02-04 14:30:00"
-      in T.take 5 $ T.drop 11 timeStr  -- "14:30"
+          timeStr = T.pack $ show local -- "2026-02-04 14:30:00"
+       in T.take 5 $ T.drop 11 timeStr -- "14:30"
 
 -- Parse ISO8601 UTC time and convert to local, returning "Mon D HH:MM" or "Mon D"
 formatDateLocal :: TZ -> Text -> Text
 formatDateLocal tz isoDate =
   case parseUtcTime isoDate of
-    Nothing -> formatDateFallback isoDate  -- fallback to raw parsing
+    Nothing -> formatDateFallback isoDate -- fallback to raw parsing
     Just utc ->
       let local = utcToLocal tz utc
-          localStr = T.pack $ show local  -- "2026-02-04 14:30:00"
-          datePart = T.take 10 localStr  -- "2026-02-04"
-          timePart = T.drop 11 localStr  -- "14:30:00"
+          localStr = T.pack $ show local -- "2026-02-04 14:30:00"
+          datePart = T.take 10 localStr -- "2026-02-04"
+          timePart = T.drop 11 localStr -- "14:30:00"
           month = case T.take 2 (T.drop 5 datePart) of
-            "01" -> "Jan"; "02" -> "Feb"; "03" -> "Mar"; "04" -> "Apr"
-            "05" -> "May"; "06" -> "Jun"; "07" -> "Jul"; "08" -> "Aug"
-            "09" -> "Sep"; "10" -> "Oct"; "11" -> "Nov"; "12" -> "Dec"
+            "01" -> "Jan"
+            "02" -> "Feb"
+            "03" -> "Mar"
+            "04" -> "Apr"
+            "05" -> "May"
+            "06" -> "Jun"
+            "07" -> "Jul"
+            "08" -> "Aug"
+            "09" -> "Sep"
+            "10" -> "Oct"
+            "11" -> "Nov"
+            "12" -> "Dec"
             _ -> "???"
           day = T.dropWhile (== '0') $ T.drop 8 datePart
           time = T.take 5 timePart
-      in if T.null timePart || time == "00:00"
-         then month <> " " <> day
-         else month <> " " <> day <> " " <> time
+       in if T.null timePart || time == "00:00"
+            then month <> " " <> day
+            else month <> " " <> day <> " " <> time
 
 -- Fallback date formatting when parsing fails (uses raw ISO string)
 formatDateFallback :: Text -> Text
@@ -426,15 +452,24 @@ formatDateFallback isoDate =
       datePart = T.take 10 dateStr
       timePart = T.drop 11 dateStr
       month = case T.take 2 (T.drop 5 datePart) of
-        "01" -> "Jan"; "02" -> "Feb"; "03" -> "Mar"; "04" -> "Apr"
-        "05" -> "May"; "06" -> "Jun"; "07" -> "Jul"; "08" -> "Aug"
-        "09" -> "Sep"; "10" -> "Oct"; "11" -> "Nov"; "12" -> "Dec"
+        "01" -> "Jan"
+        "02" -> "Feb"
+        "03" -> "Mar"
+        "04" -> "Apr"
+        "05" -> "May"
+        "06" -> "Jun"
+        "07" -> "Jul"
+        "08" -> "Aug"
+        "09" -> "Sep"
+        "10" -> "Oct"
+        "11" -> "Nov"
+        "12" -> "Dec"
         _ -> "???"
       day = T.dropWhile (== '0') $ T.drop 8 datePart
       time = T.take 5 timePart
-  in if T.null timePart || time == "00:00"
-     then month <> " " <> day
-     else month <> " " <> day <> " " <> time
+   in if T.null timePart || time == "00:00"
+        then month <> " " <> day
+        else month <> " " <> day <> " " <> time
 
 -- Parse ISO8601 UTC time string to UTCTime
 parseUtcTime :: Text -> Maybe UTCTime
@@ -444,7 +479,7 @@ runApprove :: Text -> IO ()
 runApprove aid = do
   manager <- newManager defaultManagerSettings
   initialReq <- parseRequest $ baseUrl <> "/activities/" <> unpack aid <> "/approve"
-  let req = initialReq { method = "POST" }
+  let req = initialReq{method = "POST"}
   response <- httpLbs req manager
   case decode (responseBody response) of
     Just (Object obj) -> case KM.lookup "status" obj of
@@ -458,7 +493,7 @@ runDismiss :: Text -> IO ()
 runDismiss aid = do
   manager <- newManager defaultManagerSettings
   initialReq <- parseRequest $ baseUrl <> "/activities/" <> unpack aid <> "/dismiss"
-  let req = initialReq { method = "POST" }
+  let req = initialReq{method = "POST"}
   response <- httpLbs req manager
   case decode (responseBody response) of
     Just (Object obj) -> case KM.lookup "status" obj of
@@ -551,10 +586,10 @@ showDateField tz label key obj = case KM.lookup (fromString $ unpack key) obj of
 formatDateTimeLocal :: TZ -> Text -> Text
 formatDateTimeLocal tz isoDate =
   case parseUtcTime isoDate of
-    Nothing -> isoDate  -- fallback to raw string
+    Nothing -> isoDate -- fallback to raw string
     Just utc ->
       let local = utcToLocal tz utc
-      in T.pack $ show local  -- "2026-02-04 14:30:00"
+       in T.pack $ show local -- "2026-02-04 14:30:00"
 
 -- Show an array field
 showArrayField :: Text -> Text -> KM.KeyMap Value -> IO ()
@@ -671,16 +706,18 @@ runChatWithOptions cfg chatOpts = do
           -- Send to server with timezone
           manager <- newManager defaultManagerSettings
           initialReq <- parseRequest $ baseUrl <> "/chat"
-          let reqBody = object
-                [ "agent" .= agent
-                , "messages" .= [object ["role" .= smRole m, "content" .= smContent m] | m <- allMessages]
-                , "timezone" .= timezone cfg  -- Include user's timezone
-                ]
-          let req = initialReq
-                { method = "POST"
-                , requestHeaders = [("Content-Type", "application/json")]
-                , requestBody = RequestBodyLBS (encode reqBody)
-                }
+          let reqBody =
+                object
+                  [ "agent" .= agent
+                  , "messages" .= [object ["role" .= smRole m, "content" .= smContent m] | m <- allMessages]
+                  , "timezone" .= timezone cfg -- Include user's timezone
+                  ]
+          let req =
+                initialReq
+                  { method = "POST"
+                  , requestHeaders = [("Content-Type", "application/json")]
+                  , requestBody = RequestBodyLBS (encode reqBody)
+                  }
           response <- httpLbs req manager
 
           case decode (responseBody response) of
@@ -692,14 +729,14 @@ runChatWithOptions cfg chatOpts = do
                 let toolCall = KM.lookup "tool_call" obj
                 let assistantMsg = SessionMessage "assistant" respMsg toolCall
                 let updatedMessages = allMessages ++ [assistantMsg]
-                let session = Session
-                      { sessionAgent = agent
-                      , sessionCreatedAt = maybe now sessionCreatedAt existingSession
-                      , sessionUpdatedAt = now
-                      , sessionMessages = updatedMessages
-                      }
+                let session =
+                      Session
+                        { sessionAgent = agent
+                        , sessionCreatedAt = maybe now sessionCreatedAt existingSession
+                        , sessionUpdatedAt = now
+                        , sessionMessages = updatedMessages
+                        }
                 saveSession sessionName session
-
               _ -> case KM.lookup "error" obj of
                 Just (String err) -> TIO.putStrLn $ "Error: " <> err
                 _ -> TIO.putStrLn "Unexpected response"
@@ -734,7 +771,7 @@ runClassify = do
   TIO.putStrLn "Running classification pipeline..."
   manager <- newManager defaultManagerSettings
   initialReq <- parseRequest $ baseUrl <> "/pipeline/run"
-  let req = initialReq { method = "POST" }
+  let req = initialReq{method = "POST"}
   response <- httpLbs req manager
   case decode (responseBody response) of
     Just (Object obj) -> do
@@ -754,7 +791,7 @@ runPoll = do
   TIO.putStrLn "Triggering poll..."
   manager <- newManager defaultManagerSettings
   initialReq <- parseRequest $ baseUrl <> "/poll"
-  let req = initialReq { method = "POST" }
+  let req = initialReq{method = "POST"}
   response <- httpLbs req manager
   case decode (responseBody response) of
     Just (Object obj) -> case KM.lookup "status" obj of
@@ -798,7 +835,7 @@ waitForNewAccount manager oldCount remaining = do
   if newCount > oldCount
     then TIO.putStrLn "Authentication successful! New account added."
     else do
-      threadDelay 1000000  -- 1 second
+      threadDelay 1000000 -- 1 second
       waitForNewAccount manager oldCount (remaining - 1)
 
 runStatus :: IO ()
@@ -850,7 +887,7 @@ runStatus = do
         TIO.putStrLn "            all clear"
     _ -> TIO.putStrLn "Activities: unavailable"
 
-showT :: Show a => a -> Text
+showT :: (Show a) => a -> Text
 showT = pack . show
 
 -- Show a single account from auth status

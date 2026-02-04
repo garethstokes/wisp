@@ -4,7 +4,7 @@
 
 server:
   host: "127.0.0.1"
-  port: 8080
+  port: 5812
 
 database:
   url: "postgres://localhost:5432/wisp"
