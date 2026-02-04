@@ -4,6 +4,7 @@ module Agents.Scheduler
     -- Types
   , SchedulerToolCall(..)
   , CalendarQuery(..)
+  , FreeSlotQuery(..)
   , ToolResult(..)
     -- Dispatcher
   , executeToolCall
