@@ -87,7 +87,7 @@ callClaudeWithSystem apiKey model systemPrompt userMessage = do
     initReq <- parseRequest url
     let reqBody = object
           [ "model" .= model
-          , "max_tokens" .= (2048 :: Int)
+          , "max_tokens" .= (4096 :: Int)
           , "system" .= systemPrompt
           , "messages" .= [object ["role" .= ("user" :: Text), "content" .= userMessage]]
           ]

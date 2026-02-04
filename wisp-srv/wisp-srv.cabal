@@ -35,7 +35,6 @@ executable wisp-srv
         Domain.Account
         Domain.Activity
         Domain.Chat
-        Domain.ChatAction
         Domain.Classification
         Domain.Id
         Domain.Person
@@ -69,7 +68,6 @@ executable wisp-srv
         Services.PeopleResolver
         Services.Router
         Services.Scheduler
-        Services.Chat
         Services.ClassificationQueue
         Services.Notification
         Services.NotificationLoop
@@ -122,7 +120,6 @@ test-suite wisp-srv-test
         Domain.Activity
         Domain.ActivitySpec
         Domain.Chat
-        Domain.ChatAction
         Domain.ChatSpec
         Domain.Classification
         Domain.ClassificationSpec
@@ -183,8 +180,6 @@ test-suite wisp-srv-test
         Services.Router
         Services.RouterSpec
         Services.Scheduler
-        Services.Chat
-        Services.ChatSpec
         Services.ClassificationQueue
         Services.ClassificationQueueSpec
         Services.Notification

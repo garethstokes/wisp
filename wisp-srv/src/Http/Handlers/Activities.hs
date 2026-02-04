@@ -5,6 +5,7 @@ module Http.Handlers.Activities
   , getActivityById
   , getActivityLogs
   , getInbox
+  , getReview
   , approveActivity
   , dismissActivity
   , triggerPoll
@@ -114,6 +115,17 @@ getInbox = do
     , "quarantined" .= map activityToJson quarantined
     , "high_urgency" .= map activityToJson highUrgency
     , "total" .= length activities
+    ]
+
+-- GET /review - Activities needing review (tier 3)
+getReview :: ActionT (ReaderT Env IO) ()
+getReview = do
+  activities <- lift $ getActivitiesByStatus NeedsReview 100
+  totalCount <- lift $ countActivitiesByStatus NeedsReview
+  json $ object
+    [ "activities" .= map activityToJson activities
+    , "count" .= length activities
+    , "total" .= totalCount
     ]
 
 -- POST /activities/:id/approve - Move quarantined to surfaced

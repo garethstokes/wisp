@@ -5,6 +5,7 @@ module Infra.Db.Person
   , getAllPeople
   , getImportantPeople
   , updatePersonContact
+  , searchPeople
   ) where
 
 import Control.Monad.IO.Class (liftIO)
@@ -107,3 +108,17 @@ updatePersonContact pid = do
     \updated_at = now() where id = ?"
     (Only $ unEntityId pid)
   pure ()
+
+-- Search people by email or display name
+searchPeople :: Text -> Int -> App [Person]
+searchPeople searchTerm limit = do
+  conn <- getConn
+  let pattern = "%" <> searchTerm <> "%"
+  liftIO $ query conn
+    "select id, email, display_name, personas, relationship, organisation, \
+    \notes, first_contact, last_contact, contact_count, created_at \
+    \from people \
+    \where email ilike ? or display_name ilike ? \
+    \order by contact_count desc, last_contact desc nulls last \
+    \limit ?"
+    (pattern, pattern, limit)

@@ -21,6 +21,7 @@ data Command
   | Poll
   | Classify
   | Inbox
+  | Review
   | Approve Text
   | Dismiss Text
   | People
@@ -35,6 +36,7 @@ commandParser :: Parser Command
 commandParser = subparser
   ( command "status" (info (pure Status) (progDesc "Server status and activity counts"))
   <> command "inbox" (info (pure Inbox) (progDesc "Activities needing attention (quarantined, surfaced)"))
+  <> command "review" (info (pure Review) (progDesc "Activities needing review (tier 3 - uncertain classification)"))
   <> command "activity" (info activityParser (progDesc "Show full details for an activity"))
   <> command "logs" (info logsParser (progDesc "Show processing history for an activity"))
   <> command "approve" (info approveParser (progDesc "Move quarantined activity to surfaced"))
@@ -86,6 +88,7 @@ main = do
     Poll -> runPoll
     Classify -> runClassify
     Inbox -> runInbox
+    Review -> runReview
     Approve aid -> runApprove aid
     Dismiss aid -> runDismiss aid
     People -> runPeople
@@ -100,7 +103,8 @@ runHelp = do
   TIO.putStrLn ""
   TIO.putStrLn "Commands:"
   TIO.putStrLn "  status         Server status and activity counts"
-  TIO.putStrLn "  inbox          Activities needing attention"
+  TIO.putStrLn "  inbox          Activities needing attention (surfaced, quarantined)"
+  TIO.putStrLn "  review         Activities needing review (tier 3 - uncertain)"
   TIO.putStrLn "  activity ID    Show full details for an activity"
   TIO.putStrLn "  logs ID        Show processing history for an activity"
   TIO.putStrLn "  approve ID     Move quarantined activity to surfaced"
@@ -147,6 +151,26 @@ runInbox = do
         Just (Number n) | n == 0 -> TIO.putStrLn "No activities requiring attention."
         _ -> return ()
     _ -> TIO.putStrLn "Failed to fetch inbox"
+
+runReview :: IO ()
+runReview = do
+  manager <- newManager defaultManagerSettings
+  req <- parseRequest $ baseUrl <> "/review"
+  response <- httpLbs req manager
+  case decode (responseBody response) of
+    Just (Object obj) -> do
+      case KM.lookup "activities" obj of
+        Just (Array items) | not (null items) -> do
+          let total = case KM.lookup "total" obj of
+                Just (Number n) -> round n :: Int
+                _ -> length (toList items)
+          TIO.putStrLn $ "🔍 Needs Review (" <> showT (length (toList items)) <> " of " <> showT total <> "):"
+          TIO.putStrLn ""
+          mapM_ (showActivityBrief "  ") (toList items)
+          TIO.putStrLn ""
+          TIO.putStrLn "Use 'wisp activity ID' to see details, 'wisp approve ID' or 'wisp dismiss ID' to act"
+        _ -> TIO.putStrLn "No activities needing review."
+    _ -> TIO.putStrLn "Failed to fetch review queue"
 
 -- Show a brief activity line
 showActivityBrief :: Text -> Value -> IO ()

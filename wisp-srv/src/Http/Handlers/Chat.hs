@@ -11,7 +11,7 @@ import Network.HTTP.Types.Status (status400, status500)
 import Web.Scotty.Trans (ActionT, json, status, jsonData)
 import App.Monad (Env)
 import Domain.Chat (ChatRequest(..), ChatResponse(..))
-import Services.Chat (processChat)
+import Agents.Concierge (handleChat)
 
 -- POST /chat
 postChat :: ActionT (ReaderT Env IO) ()
@@ -23,7 +23,7 @@ postChat = do
       status status400
       json $ object ["error" .= ("Message cannot be empty" :: Text)]
     else do
-      result <- lift $ processChat msg
+      result <- lift $ handleChat msg
       case result of
         Left err -> do
           status status500
