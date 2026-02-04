@@ -34,6 +34,7 @@ executable wisp-srv
         App.Env
         Domain.Account
         Domain.Activity
+        Domain.Agent
         Domain.Chat
         Domain.Classification
         Domain.Id
@@ -119,6 +120,8 @@ test-suite wisp-srv-test
         Domain.AccountSpec
         Domain.Activity
         Domain.ActivitySpec
+        Domain.Agent
+        Domain.AgentSpec
         Domain.Chat
         Domain.ChatSpec
         Domain.Classification
