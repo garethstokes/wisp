@@ -16,6 +16,8 @@ module Infra.Db.Activity
   , getPendingEmails
   , updateActivityStatus
   , updateActivityClassification
+  , searchActivities
+  , getActivitySummaryStats
   , DbActivity(..)
   ) where
 
@@ -215,6 +217,32 @@ getUpcomingCalendarEvents days = do
     \order by starts_at"
     (Only days)
   pure $ map unDbActivity results
+
+-- Search activities by title/summary text
+searchActivities :: Text -> Int -> App [Activity]
+searchActivities searchTerm limit = do
+  conn <- getConn
+  let pattern = "%" <> searchTerm <> "%"
+  results <- liftIO $ query conn
+    "select id, account_id, source, source_id, raw, status, title, summary, \
+    \sender_email, starts_at, ends_at, created_at, \
+    \personas, activity_type, urgency, autonomy_tier, confidence, person_id \
+    \from activities \
+    \where title ilike ? or summary ilike ? or sender_email ilike ? \
+    \order by created_at desc \
+    \limit ?"
+    (pattern, pattern, pattern, limit)
+  pure $ map unDbActivity results
+
+-- Get activity counts grouped by status and source
+getActivitySummaryStats :: App [(Text, Text, Int)]
+getActivitySummaryStats = do
+  conn <- getConn
+  liftIO $ query_ conn
+    "select source, status, count(*)::int \
+    \from activities \
+    \group by source, status \
+    \order by source, status"
 
 -- Get pending emails (for chat context)
 getPendingEmails :: Int -> App [Activity]
