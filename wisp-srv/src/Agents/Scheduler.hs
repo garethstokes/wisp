@@ -22,6 +22,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
 import Data.Time (UTCTime, getCurrentTime, addUTCTime, nominalDay, diffUTCTime)
+import qualified Data.Time.Format as TF
 import Data.Time.Zones (TZ, loadSystemTZ, utcToLocalTimeTZ)
 import App.Monad (App, Env(..))
 import App.Config (Config(..), ClaudeConfig(..))
@@ -140,8 +141,10 @@ eventToJson mTz a = object
   ]
 
 formatTime :: Maybe TZ -> UTCTime -> Text
-formatTime Nothing utc = T.pack $ show utc
-formatTime (Just tz) utc = T.pack $ show $ utcToLocalTimeTZ tz utc
+formatTime Nothing utc = T.pack $ TF.formatTime TF.defaultTimeLocale "%Y-%m-%d %H:%M:%S UTC" utc
+formatTime (Just tz) utc =
+  let localTime = utcToLocalTimeTZ tz utc
+  in T.pack $ TF.formatTime TF.defaultTimeLocale "%Y-%m-%d %H:%M:%S %Z" localTime
 
 -- Find free slots between events during work hours
 findFreeSlots :: Maybe TZ -> UTCTime -> Int -> Int -> Int -> Int -> [Activity] -> [Value]

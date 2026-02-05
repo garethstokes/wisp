@@ -127,6 +127,7 @@ test-suite wisp-srv-test
         Agents.DispatcherSpec
         Agents.Housekeeper
         Agents.Insights
+        Agents.InsightsSpec
         Agents.Scheduler
         Agents.SchedulerSpec
         Domain.Account

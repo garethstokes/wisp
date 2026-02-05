@@ -32,5 +32,5 @@ dispatchChat :: Text -> [ChatMessage] -> Maybe Text -> App (Either Text ChatResp
 dispatchChat "wisp/concierge" msgs tz = Concierge.handleChat msgs tz
 dispatchChat "wisp/scheduler" msgs tz = Scheduler.handleChat msgs tz
 dispatchChat "wisp/housekeeper" _ _ = pure $ Left "Agent 'wisp/housekeeper' not yet implemented"
-dispatchChat "wisp/insights" _ _ = pure $ Left "Agent 'wisp/insights' not yet implemented"
+dispatchChat "wisp/insights" msgs tz = Insights.handleChat msgs tz
 dispatchChat agent _ _ = pure $ Left $ "Unknown agent: " <> agent

@@ -63,15 +63,19 @@ Admin hygiene, receipts, anomaly detection.
 
 ---
 
-### wisp/insights [NOT IMPLEMENTED]
+### wisp/insights [IMPLEMENTED]
 
-Retrieval, summaries, feedback clustering.
+Activity search, pattern analysis, and people frequency insights.
 
 **Deterministic flows:** (none)
 
 **Decision flows:**
-- `feedback-cluster` - Cluster user feedback
-- `generate-summary` - Generate activity summaries
+- `search` - Search activities and analyze patterns
+
+**Tools:**
+- `search_activities` (decision) - Full-text search across activities with optional date range and status filters
+- `get_summary` (decision) - Statistical overview of recent activities by status and type
+- `get_people_insights` (decision) - Analyze frequent contacts and interaction patterns
 
 ## Adding a New Agent
 
