@@ -329,7 +329,7 @@ buildConversationPrompt msgs = T.unlines
   | m <- msgs
   , let role = case messageRole m of
           "user" -> "User"
-          "assistant" -> "Assistant"
+          "assistant" -> fromMaybe "Assistant" (messageAgent m)  -- Use agent name if available
           "tool" -> "Tool Result"
           r -> r
   ]

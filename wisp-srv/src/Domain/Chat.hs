@@ -25,6 +25,7 @@ data ChatContext = ChatContext
 data ChatMessage = ChatMessage
   { messageRole    :: Text        -- "user" | "assistant" | "tool"
   , messageContent :: Text
+  , messageAgent   :: Maybe Text  -- Which agent responded (for assistant messages)
   , messageToolCall :: Maybe Value
   } deriving (Show, Eq)
 
@@ -32,13 +33,16 @@ instance FromJSON ChatMessage where
   parseJSON = withObject "ChatMessage" $ \v -> ChatMessage
     <$> v .: "role"
     <*> v .: "content"
+    <*> v .:? "agent"
     <*> v .:? "tool_call"
 
 instance ToJSON ChatMessage where
   toJSON m = object $
     [ "role" .= messageRole m
     , "content" .= messageContent m
-    ] ++ maybe [] (\tc -> ["tool_call" .= tc]) (messageToolCall m)
+    ]
+    ++ maybe [] (\a -> ["agent" .= a]) (messageAgent m)
+    ++ maybe [] (\tc -> ["tool_call" .= tc]) (messageToolCall m)
 
 -- Incoming chat request (updated)
 data ChatRequest = ChatRequest

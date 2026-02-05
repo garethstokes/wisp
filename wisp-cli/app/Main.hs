@@ -127,8 +127,7 @@ baseUrl = "http://127.0.0.1:5812"
 --------------------------------------------------------------------------------
 
 data Session = Session
-  { sessionAgent :: Text
-  , sessionCreatedAt :: Text
+  { sessionCreatedAt :: Text
   , sessionUpdatedAt :: Text
   , sessionMessages :: [SessionMessage]
   }
@@ -137,6 +136,7 @@ data Session = Session
 data SessionMessage = SessionMessage
   { smRole :: Text
   , smContent :: Text
+  , smAgent :: Maybe Text  -- Which agent responded (for assistant messages)
   , smToolCall :: Maybe Value
   }
   deriving (Show)
@@ -144,16 +144,14 @@ data SessionMessage = SessionMessage
 instance FromJSON Session where
   parseJSON = withObject "Session" $ \v ->
     Session
-      <$> v .: "agent"
-      <*> v .: "created_at"
+      <$> v .: "created_at"
       <*> v .: "updated_at"
       <*> v .: "messages"
 
 instance ToJSON Session where
   toJSON s =
     object
-      [ "agent" .= sessionAgent s
-      , "created_at" .= sessionCreatedAt s
+      [ "created_at" .= sessionCreatedAt s
       , "updated_at" .= sessionUpdatedAt s
       , "messages" .= sessionMessages s
       ]
@@ -163,6 +161,7 @@ instance FromJSON SessionMessage where
     SessionMessage
       <$> v .: "role"
       <*> v .: "content"
+      <*> v .:? "agent"
       <*> v .:? "tool_call"
 
 instance ToJSON SessionMessage where
@@ -171,6 +170,7 @@ instance ToJSON SessionMessage where
       [ "role" .= smRole m
       , "content" .= smContent m
       ]
+        ++ maybe [] (\a -> ["agent" .= a]) (smAgent m)
         ++ maybe [] (\tc -> ["tool_call" .= tc]) (smToolCall m)
 
 getSessionsDir :: IO FilePath
@@ -692,55 +692,58 @@ runChatWithOptions cfg chatOpts = do
       -- Load or create session
       existingSession <- if isNew then pure Nothing else loadSession sessionName
 
-      -- Validate agent matches session
-      case existingSession of
-        Just s | sessionAgent s /= agent -> do
-          TIO.putStrLn $ "Session '" <> sessionName <> "' is bound to " <> sessionAgent s <> ", not " <> agent
-        _ -> do
-          -- Build messages list
-          now <- pack . iso8601Show <$> getCurrentTime
-          let existingMessages = maybe [] sessionMessages existingSession
-          let newUserMsg = SessionMessage "user" msg Nothing
-          let allMessages = existingMessages ++ [newUserMsg]
+      -- Build messages list
+      now <- pack . iso8601Show <$> getCurrentTime
+      let existingMessages = maybe [] sessionMessages existingSession
+      let newUserMsg = SessionMessage "user" msg Nothing Nothing  -- user messages have no agent
+      let allMessages = existingMessages ++ [newUserMsg]
 
-          -- Send to server with timezone
-          manager <- newManager defaultManagerSettings
-          initialReq <- parseRequest $ baseUrl <> "/chat"
-          let reqBody =
-                object
-                  [ "agent" .= agent
-                  , "messages" .= [object ["role" .= smRole m, "content" .= smContent m] | m <- allMessages]
-                  , "timezone" .= timezone cfg -- Include user's timezone
-                  ]
-          let req =
-                initialReq
-                  { method = "POST"
-                  , requestHeaders = [("Content-Type", "application/json")]
-                  , requestBody = RequestBodyLBS (encode reqBody)
-                  }
-          response <- httpLbs req manager
+      -- Send to server with timezone and agent info per message
+      manager <- newManager defaultManagerSettings
+      initialReq <- parseRequest $ baseUrl <> "/chat"
+      let reqBody =
+            object
+              [ "agent" .= agent
+              , "messages" .= [messageToJson m | m <- allMessages]
+              , "timezone" .= timezone cfg -- Include user's timezone
+              ]
+      let req =
+            initialReq
+              { method = "POST"
+              , requestHeaders = [("Content-Type", "application/json")]
+              , requestBody = RequestBodyLBS (encode reqBody)
+              }
+      response <- httpLbs req manager
 
-          case decode (responseBody response) of
-            Just (Object obj) -> case KM.lookup "message" obj of
-              Just (String respMsg) -> do
-                TIO.putStrLn respMsg
+      case decode (responseBody response) of
+        Just (Object obj) -> case KM.lookup "message" obj of
+          Just (String respMsg) -> do
+            TIO.putStrLn respMsg
 
-                -- Save session with response
-                let toolCall = KM.lookup "tool_call" obj
-                let assistantMsg = SessionMessage "assistant" respMsg toolCall
-                let updatedMessages = allMessages ++ [assistantMsg]
-                let session =
-                      Session
-                        { sessionAgent = agent
-                        , sessionCreatedAt = maybe now sessionCreatedAt existingSession
-                        , sessionUpdatedAt = now
-                        , sessionMessages = updatedMessages
-                        }
-                saveSession sessionName session
-              _ -> case KM.lookup "error" obj of
-                Just (String err) -> TIO.putStrLn $ "Error: " <> err
-                _ -> TIO.putStrLn "Unexpected response"
-            _ -> TIO.putStrLn "Failed to parse response"
+            -- Save session with response (tag assistant message with agent)
+            let toolCall = KM.lookup "tool_call" obj
+            let assistantMsg = SessionMessage "assistant" respMsg (Just agent) toolCall
+            let updatedMessages = allMessages ++ [assistantMsg]
+            let session =
+                  Session
+                    { sessionCreatedAt = maybe now sessionCreatedAt existingSession
+                    , sessionUpdatedAt = now
+                    , sessionMessages = updatedMessages
+                    }
+            saveSession sessionName session
+          _ -> case KM.lookup "error" obj of
+            Just (String err) -> TIO.putStrLn $ "Error: " <> err
+            _ -> TIO.putStrLn "Unexpected response"
+        _ -> TIO.putStrLn "Failed to parse response"
+
+-- Convert a session message to JSON for the API request
+messageToJson :: SessionMessage -> Value
+messageToJson m =
+  object $
+    [ "role" .= smRole m
+    , "content" .= smContent m
+    ]
+      ++ maybe [] (\a -> ["agent" .= a]) (smAgent m)
 
 runSessions :: SessionsOptions -> IO ()
 runSessions sessOpts = case sessionsDelete sessOpts of
@@ -763,7 +766,7 @@ runSessions sessOpts = case sessionsDelete sessOpts of
         forM_ sessions $ \name -> do
           mSession <- loadSession name
           case mSession of
-            Just s -> TIO.putStrLn $ "  " <> name <> " (" <> sessionAgent s <> ", " <> showT (length (sessionMessages s)) <> " messages)"
+            Just s -> TIO.putStrLn $ "  " <> name <> " (" <> showT (length (sessionMessages s)) <> " messages)"
             Nothing -> TIO.putStrLn $ "  " <> name <> " (corrupt)"
 
 runClassify :: IO ()
