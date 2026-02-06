@@ -119,6 +119,7 @@ test-suite wisp-srv-test
         DerivingStrategies
         LambdaCase
         QuasiQuotes
+        RecordWildCards
     other-modules:
         Agents.Concierge
         Agents.Concierge.Classifier
@@ -184,6 +185,7 @@ test-suite wisp-srv-test
         Infra.Db.Receipt
         Infra.Db.ReceiptSpec
         Infra.Db.Run
+        Infra.Db.RunSpec
         Infra.Claude.Client
         Infra.Claude.ClientSpec
         Infra.Google.Auth
