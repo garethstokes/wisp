@@ -1,3 +1,5 @@
+{-# LANGUAGE RecordWildCards #-}
+
 module Domain.Run
   ( RunId(..)
   , Run(..)

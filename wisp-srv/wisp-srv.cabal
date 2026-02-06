@@ -148,6 +148,7 @@ test-suite wisp-srv-test
         Domain.Receipt
         Domain.ReceiptSpec
         Domain.Run
+        Domain.RunSpec
         Domain.Schema
         Domain.SchemaSpec
         App.Config
