@@ -44,6 +44,7 @@ executable wisp-srv
         Domain.Id
         Domain.Person
         Domain.Receipt
+        Domain.Run
         Domain.Schema
         Http.Handlers.Activities
         Http.Handlers.Agents
@@ -146,6 +147,7 @@ test-suite wisp-srv-test
         Domain.PersonSpec
         Domain.Receipt
         Domain.ReceiptSpec
+        Domain.Run
         Domain.Schema
         Domain.SchemaSpec
         App.Config
