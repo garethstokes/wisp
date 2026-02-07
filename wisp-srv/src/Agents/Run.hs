@@ -5,11 +5,14 @@ module Agents.Run
   ( withRunLogging
   , RunContext(..)
   , callClaudeLogged
+  , logToolRequest
+  , logToolSuccess
+  , logToolFailure
   ) where
 
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Reader (asks)
-import Data.Aeson (toJSON, object, (.=))
+import Data.Aeson (Value, toJSON, object, (.=))
 import Data.Text (Text)
 import Data.Time (getCurrentTime)
 import App.Config (Config(..), ClaudeConfig(..))
@@ -116,3 +119,56 @@ callClaudeLogged ctx systemPrompt userPrompt = do
             }
       _ <- appendEvent (rcRunId ctx) event
       pure $ Right response
+
+-- | Log a tool request event
+logToolRequest
+  :: RunContext
+  -> Text           -- ^ Tool name
+  -> Value          -- ^ Tool arguments
+  -> App Text       -- ^ Returns event ID for linking
+logToolRequest ctx toolName toolArgs = do
+  now <- liftIO getCurrentTime
+  let event = ToolRequested
+        { eventId = ""
+        , eventParentEventId = Nothing
+        , eventTimestamp = now
+        , eventToolName = toolName
+        , eventToolArgs = toolArgs
+        }
+  appendEvent (rcRunId ctx) event
+
+-- | Log a tool success event
+logToolSuccess
+  :: RunContext
+  -> Text           -- ^ Tool name
+  -> Value          -- ^ Result
+  -> App ()
+logToolSuccess ctx toolName result = do
+  now <- liftIO getCurrentTime
+  let event = ToolSucceeded
+        { eventId = ""
+        , eventParentEventId = Nothing
+        , eventTimestamp = now
+        , eventToolName = toolName
+        , eventResult = result
+        }
+  _ <- appendEvent (rcRunId ctx) event
+  pure ()
+
+-- | Log a tool failure event
+logToolFailure
+  :: RunContext
+  -> Text           -- ^ Tool name
+  -> Text           -- ^ Error message
+  -> App ()
+logToolFailure ctx toolName errMsg = do
+  now <- liftIO getCurrentTime
+  let event = ToolFailed
+        { eventId = ""
+        , eventParentEventId = Nothing
+        , eventTimestamp = now
+        , eventToolName = toolName
+        , eventError = errMsg
+        }
+  _ <- appendEvent (rcRunId ctx) event
+  pure ()
