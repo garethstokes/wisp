@@ -9,7 +9,7 @@ module Infra.Db.Run
   ) where
 
 import Control.Monad.IO.Class (liftIO)
-import Data.Aeson (Value, toJSON)
+import Data.Aeson (Value, toJSON, Result(..), fromJSON)
 import Data.Maybe (listToMaybe)
 import Data.Text (Text)
 import Data.Time (UTCTime, getCurrentTime)
@@ -180,13 +180,14 @@ dbRunToRun DbRun {..} events = Run
 
 dbEventToEvent :: DbRunEvent -> RunEvent
 dbEventToEvent DbRunEvent {..} =
-  -- The event_data contains the full event JSON, we just return it as-is
-  -- In a real implementation, we'd parse it back to the specific event type
-  -- For now, we treat all stored events as InputEvents with the raw data
-  InputEvent
-    { eventId = dbEventId
-    , eventParentEventId = dbEventParentId
-    , eventTimestamp = dbEventCreatedAt
-    , eventTool = dbEventType
-    , eventData = dbEventData
-    }
+  case fromJSON dbEventData of
+    Success event -> event
+    Error _ ->
+      -- Fallback for malformed data (shouldn't happen)
+      InputEvent
+        { eventId = dbEventId
+        , eventParentEventId = dbEventParentId
+        , eventTimestamp = dbEventCreatedAt
+        , eventTool = dbEventType
+        , eventData = dbEventData
+        }
