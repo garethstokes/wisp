@@ -12,6 +12,7 @@ import qualified Agents.Concierge as Concierge
 import qualified Agents.Scheduler as Scheduler
 import qualified Agents.Housekeeper as Housekeeper
 import qualified Agents.Insights as Insights
+import Agents.Run (withRunLogging)
 
 allAgents :: [AgentInfo]
 allAgents =
@@ -29,8 +30,10 @@ getAgent aid = case [a | a <- allAgents, agentId a == aid] of
 -- | Dispatch chat to the appropriate agent
 -- timezone: Optional IANA timezone for converting dates to local time in agent context
 dispatchChat :: Text -> [ChatMessage] -> Maybe Text -> App (Either Text ChatResponse)
-dispatchChat "wisp/concierge" msgs tz = Concierge.handleChat msgs tz
-dispatchChat "wisp/scheduler" msgs tz = Scheduler.handleChat msgs tz
-dispatchChat "wisp/housekeeper" _ _ = pure $ Left "Agent 'wisp/housekeeper' not yet implemented"
-dispatchChat "wisp/insights" msgs tz = Insights.handleChat msgs tz
-dispatchChat agent _ _ = pure $ Left $ "Unknown agent: " <> agent
+dispatchChat agent msgs tz = withRunLogging agent Nothing msgs $ \messages ->
+  case agent of
+    "wisp/concierge" -> Concierge.handleChat messages tz
+    "wisp/scheduler" -> Scheduler.handleChat messages tz
+    "wisp/housekeeper" -> pure $ Left "Agent 'wisp/housekeeper' not yet implemented"
+    "wisp/insights" -> Insights.handleChat messages tz
+    _ -> pure $ Left $ "Unknown agent: " <> agent
