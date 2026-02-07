@@ -1,6 +1,7 @@
 module Agents.Scheduler
   ( -- Decision flows
     handleChat
+  , handleChatWithContext
     -- Types
   , SchedulerToolCall(..)
   , CalendarQuery(..)
@@ -30,6 +31,7 @@ import Domain.Activity (Activity(..))
 import Domain.Id (unEntityId)
 import Infra.Db.Activity (getTodaysCalendarEvents, getUpcomingCalendarEvents, insertConversation)
 import Infra.Claude.Client (callClaudeWithSystem)
+import Agents.Run (RunContext(..), callClaudeLogged, logToolRequest, logToolSuccess, logToolFailure)
 import Domain.Agent (AgentInfo(..), ToolInfo(..), ToolType(..))
 import Domain.Chat (ChatMessage(..), ChatResponse)
 import qualified Domain.Chat as Chat
@@ -98,6 +100,34 @@ instance FromJSON FreeSlotQuery where
 instance ToJSON ToolResult where
   toJSON (ToolSuccess v) = object ["success" .= True, "data" .= v]
   toJSON (ToolError err) = object ["success" .= False, "error" .= err]
+
+instance ToJSON SchedulerToolCall where
+  toJSON (QueryCalendar q) = object
+    [ "tool" .= ("query_calendar" :: Text)
+    , "days" .= calendarDays q
+    , "date" .= calendarDate q
+    ]
+  toJSON (FindFreeSlots q) = object
+    [ "tool" .= ("find_free_slots" :: Text)
+    , "days" .= slotDays q
+    , "duration_minutes" .= slotDuration q
+    , "start_hour" .= slotStartHour q
+    , "end_hour" .= slotEndHour q
+    ]
+
+instance ToJSON CalendarQuery where
+  toJSON CalendarQuery {..} = object
+    [ "days" .= calendarDays
+    , "date" .= calendarDate
+    ]
+
+instance ToJSON FreeSlotQuery where
+  toJSON FreeSlotQuery {..} = object
+    [ "days" .= slotDays
+    , "duration_minutes" .= slotDuration
+    , "start_hour" .= slotStartHour
+    , "end_hour" .= slotEndHour
+    ]
 
 --------------------------------------------------------------------------------
 -- Tool Dispatcher
@@ -238,6 +268,59 @@ handleChat messages mTzName = do
                   case toolResult of
                     ToolSuccess _ -> pure $ Right $ Chat.ChatResponse (llmMessage llmResp) Nothing
                     ToolError err -> pure $ Left err
+
+-- | Handle chat with run context for event logging
+handleChatWithContext :: RunContext -> [ChatMessage] -> Maybe Text -> App (Either Text ChatResponse)
+handleChatWithContext ctx messages mTzName = do
+  let userMessages = [m | m <- messages, messageRole m == "user"]
+  case userMessages of
+    [] -> pure $ Left "No user message provided"
+    _ -> do
+      mTz <- case mTzName of
+        Nothing -> pure Nothing
+        Just tzName -> liftIO $ loadTimezone tzName
+
+      -- Get calendar context
+      todayEvents <- getTodaysCalendarEvents
+      upcomingEvents <- getUpcomingCalendarEvents 7
+
+      let systemPrompt = buildChatPrompt mTz todayEvents upcomingEvents
+      let conversationPrompt = buildConversationPrompt messages
+
+      -- Call Claude with logging
+      result <- callClaudeLogged ctx systemPrompt conversationPrompt
+
+      case result of
+        Left err -> pure $ Left err
+        Right response -> do
+          case parseLLMResponse response of
+            Left err -> pure $ Left err
+            Right llmResp -> do
+              case llmToolCall llmResp of
+                Nothing -> pure $ Right $ Chat.ChatResponse (llmMessage llmResp) Nothing
+                Just toolCall -> do
+                  toolResult <- executeToolCallLogged ctx mTz toolCall
+                  case toolResult of
+                    ToolSuccess _ -> pure $ Right $ Chat.ChatResponse (llmMessage llmResp) Nothing
+                    ToolError err -> pure $ Left err
+
+-- | Execute tool call with logging
+executeToolCallLogged :: RunContext -> Maybe TZ -> SchedulerToolCall -> App ToolResult
+executeToolCallLogged ctx mTz toolCall = do
+  let toolName = case toolCall of
+        QueryCalendar {} -> "query_calendar"
+        FindFreeSlots {} -> "find_free_slots"
+
+  _ <- logToolRequest ctx toolName (toJSON toolCall)
+  result <- executeToolCall mTz toolCall
+
+  case result of
+    ToolSuccess val -> do
+      logToolSuccess ctx toolName val
+      pure result
+    ToolError err -> do
+      logToolFailure ctx toolName err
+      pure result
 
 buildConversationPrompt :: [ChatMessage] -> Text
 buildConversationPrompt msgs = T.unlines
