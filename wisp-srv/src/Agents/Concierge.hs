@@ -14,6 +14,8 @@ module Agents.Concierge
   , executeToolCall
     -- Agent metadata
   , agentInfo
+    -- Context-aware chat
+  , handleChatWithContext
   ) where
 
 import Control.Exception (try, SomeException)
@@ -41,6 +43,7 @@ import Infra.Db.Activity (getActivitiesByStatus, getActivitiesFiltered, updateAc
 import Infra.Db.Person (searchPeople, getPersonByEmail)
 import Infra.Db.Receipt (insertReceipt)
 import Infra.Claude.Client (callClaudeWithSystem)
+import Agents.Run (RunContext(..), callClaudeLogged, logToolRequest, logToolSuccess, logToolFailure)
 import Agents.Concierge.Classifier (classifyActivity)
 import Domain.Agent (AgentInfo(..), ToolInfo(..), ToolType(..))
 import Domain.Chat (ChatMessage(..), ChatResponse)
@@ -155,6 +158,59 @@ instance FromJSON PeopleFilter where
 instance ToJSON ToolResult where
   toJSON (ToolSuccess v) = object ["success" .= True, "data" .= v]
   toJSON (ToolError err) = object ["success" .= False, "error" .= err]
+
+instance ToJSON ConciergeToolCall where
+  toJSON (UpdateActivities ids updates) = object
+    [ "tool" .= ("update_activities" :: Text)
+    , "activity_ids" .= ids
+    , "updates" .= updates
+    ]
+  toJSON (QueryActivities filt) = object
+    [ "tool" .= ("query_activities" :: Text)
+    , "status" .= filterStatus filt
+    , "limit" .= filterLimit filt
+    , "since" .= filterSince filt
+    , "before" .= filterBefore filt
+    ]
+  toJSON (QueryPeople filt) = object
+    [ "tool" .= ("query_people" :: Text)
+    , "email" .= peopleEmail filt
+    , "search" .= peopleSearch filt
+    , "limit" .= peopleLimit filt
+    ]
+
+instance ToJSON ActivityUpdates where
+  toJSON ActivityUpdates {..} = object
+    [ "status" .= updatesStatus
+    , "classification" .= updatesClassification
+    ]
+
+instance ToJSON PartialClassification where
+  toJSON PartialClassification {..} = object
+    [ "activity_type" .= partialActivityType
+    , "urgency" .= partialUrgency
+    , "autonomy_tier" .= partialAutonomyTier
+    , "confidence" .= partialConfidence
+    , "personas" .= partialPersonas
+    , "reasoning" .= partialReasoning
+    , "suggested_actions" .= partialSuggestedActions
+    , "option_framing" .= partialOptionFraming
+    ]
+
+instance ToJSON ActivityFilter where
+  toJSON ActivityFilter {..} = object
+    [ "status" .= filterStatus
+    , "limit" .= filterLimit
+    , "since" .= filterSince
+    , "before" .= filterBefore
+    ]
+
+instance ToJSON PeopleFilter where
+  toJSON PeopleFilter {..} = object
+    [ "email" .= peopleEmail
+    , "search" .= peopleSearch
+    , "limit" .= peopleLimit
+    ]
 
 --------------------------------------------------------------------------------
 -- Tool Dispatcher
@@ -321,6 +377,69 @@ handleChat messages mTzName = do
                   case toolResult of
                     ToolSuccess _ -> pure $ Right $ Chat.ChatResponse (llmMessage llmResp) Nothing
                     ToolError err -> pure $ Left err
+
+-- | Handle chat with run context for event logging
+handleChatWithContext :: RunContext -> [ChatMessage] -> Maybe Text -> App (Either Text ChatResponse)
+handleChatWithContext ctx messages mTzName = do
+  let userMessages = [m | m <- messages, messageRole m == "user"]
+  case userMessages of
+    [] -> pure $ Left "No user message provided"
+    _ -> do
+      -- Load timezone if provided
+      mTz <- case mTzName of
+        Nothing -> pure Nothing
+        Just tzName -> liftIO $ loadTimezone tzName
+
+      -- Assemble context
+      calendar <- getTodaysCalendarEvents
+      quarantined <- getActivitiesByStatus Activity.Quarantined 100
+      surfaced <- getActivitiesByStatus Activity.Surfaced 100
+      needsReview <- getActivitiesByStatus Activity.NeedsReview 100
+
+      let systemPrompt = buildChatPrompt mTz calendar quarantined surfaced needsReview
+      let conversationPrompt = buildConversationPrompt messages
+
+      -- Call Claude with logging
+      result <- callClaudeLogged ctx systemPrompt conversationPrompt
+
+      case result of
+        Left err -> pure $ Left err
+        Right response -> do
+          -- Parse response
+          case parseLLMResponse response of
+            Left err -> pure $ Left err
+            Right llmResp -> do
+              -- Execute tool call if present
+              case llmToolCall llmResp of
+                Nothing -> pure $ Right $ Chat.ChatResponse (llmMessage llmResp) Nothing
+                Just toolCall -> do
+                  toolResult <- executeToolCallLogged ctx toolCall
+                  case toolResult of
+                    ToolSuccess _ -> pure $ Right $ Chat.ChatResponse (llmMessage llmResp) Nothing
+                    ToolError err -> pure $ Left err
+
+-- | Execute tool call with logging
+executeToolCallLogged :: RunContext -> ConciergeToolCall -> App ToolResult
+executeToolCallLogged ctx toolCall = do
+  let toolName = case toolCall of
+        UpdateActivities {} -> "update_activities"
+        QueryActivities {} -> "query_activities"
+        QueryPeople {} -> "query_people"
+
+  -- Log tool request
+  _ <- logToolRequest ctx toolName (toJSON toolCall)
+
+  -- Execute the tool
+  result <- executeToolCall toolCall
+
+  -- Log result
+  case result of
+    ToolSuccess val -> do
+      logToolSuccess ctx toolName val
+      pure result
+    ToolError err -> do
+      logToolFailure ctx toolName err
+      pure result
 
 -- Build conversation string from message history
 buildConversationPrompt :: [ChatMessage] -> Text
