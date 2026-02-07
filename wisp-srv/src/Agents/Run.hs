@@ -4,15 +4,19 @@
 module Agents.Run
   ( withRunLogging
   , RunContext(..)
+  , callClaudeLogged
   ) where
 
 import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Reader (asks)
 import Data.Aeson (toJSON, object, (.=))
 import Data.Text (Text)
 import Data.Time (getCurrentTime)
-import App.Monad (App)
+import App.Config (Config(..), ClaudeConfig(..))
+import App.Monad (App, Env(..))
 import Domain.Run
 import Infra.Db.Run (createRun, appendEvent, updateRunStatus)
+import Infra.Claude.Client (callClaudeWithSystem)
 import Domain.Chat (ChatMessage(..), ChatResponse(..))
 
 -- | Context passed to agent during a logged run
@@ -66,4 +70,49 @@ withRunLogging agentId mSessionId messages handleChat = do
             }
       _ <- appendEvent runId responseEvent
       updateRunStatus runId Completed
+      pure $ Right response
+
+-- | Call Claude with logging - logs LlmCalled event with full prompt/response
+callClaudeLogged
+  :: RunContext
+  -> Text           -- ^ System prompt
+  -> Text           -- ^ User prompt
+  -> App (Either Text Text)
+callClaudeLogged ctx systemPrompt userPrompt = do
+  claudeCfg <- asks (claude . config)
+  let modelName = model claudeCfg
+
+  -- Call Claude
+  result <- liftIO $ callClaudeWithSystem
+    (apiKey claudeCfg)
+    modelName
+    systemPrompt
+    userPrompt
+
+  -- Log the LLM call (success or failure)
+  now <- liftIO getCurrentTime
+  case result of
+    Left err -> do
+      let event = LlmCalled
+            { eventId = ""
+            , eventParentEventId = Nothing
+            , eventTimestamp = now
+            , eventModel = modelName
+            , eventSystemPrompt = systemPrompt
+            , eventUserPrompt = userPrompt
+            , eventRawResponse = "ERROR: " <> err
+            }
+      _ <- appendEvent (rcRunId ctx) event
+      pure $ Left err
+    Right response -> do
+      let event = LlmCalled
+            { eventId = ""
+            , eventParentEventId = Nothing
+            , eventTimestamp = now
+            , eventModel = modelName
+            , eventSystemPrompt = systemPrompt
+            , eventUserPrompt = userPrompt
+            , eventRawResponse = response
+            }
+      _ <- appendEvent (rcRunId ctx) event
       pure $ Right response
