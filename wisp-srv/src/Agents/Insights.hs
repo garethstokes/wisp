@@ -1,6 +1,7 @@
 module Agents.Insights
   ( -- Decision flows
     handleChat
+  , handleChatWithContext
     -- Types
   , InsightsToolCall(..)
   , SearchQuery(..)
@@ -34,6 +35,7 @@ import Infra.Db.Activity (searchActivities, getActivitySummaryStats, getRecentAc
 import Infra.Db.Person (getAllPeople, getImportantPeople, searchPeople)
 import Infra.Claude.Client (callClaudeWithSystem)
 import Domain.Agent (AgentInfo(..), ToolInfo(..), ToolType(..))
+import Agents.Run (RunContext(..), callClaudeLogged, logToolRequest, logToolSuccess, logToolFailure)
 import Domain.Chat (ChatMessage(..), ChatResponse)
 import qualified Domain.Chat as Chat
 
@@ -107,6 +109,39 @@ instance FromJSON PeopleQuery where
 instance ToJSON ToolResult where
   toJSON (ToolSuccess v) = object ["success" .= True, "data" .= v]
   toJSON (ToolError err) = object ["success" .= False, "error" .= err]
+
+instance ToJSON InsightsToolCall where
+  toJSON (SearchActivities q) = object
+    [ "tool" .= ("search_activities" :: Text)
+    , "query" .= searchTerm q
+    , "limit" .= searchLimit q
+    ]
+  toJSON (GetSummary q) = object
+    [ "tool" .= ("get_summary" :: Text)
+    , "hours" .= summaryHours q
+    ]
+  toJSON (GetPeopleInsights q) = object
+    [ "tool" .= ("get_people_insights" :: Text)
+    , "search" .= peopleSearch q
+    , "important_only" .= peopleImportantOnly q
+    ]
+
+instance ToJSON SearchQuery where
+  toJSON SearchQuery {..} = object
+    [ "query" .= searchTerm
+    , "limit" .= searchLimit
+    ]
+
+instance ToJSON SummaryQuery where
+  toJSON SummaryQuery {..} = object
+    [ "hours" .= summaryHours
+    ]
+
+instance ToJSON PeopleQuery where
+  toJSON PeopleQuery {..} = object
+    [ "search" .= peopleSearch
+    , "important_only" .= peopleImportantOnly
+    ]
 
 --------------------------------------------------------------------------------
 -- Tool Dispatcher
@@ -238,6 +273,60 @@ handleChat messages mTzName = do
                   case toolResult of
                     ToolSuccess _ -> pure $ Right $ Chat.ChatResponse (llmMessage llmResp) Nothing
                     ToolError err -> pure $ Left err
+
+-- | Handle chat with run context for event logging
+handleChatWithContext :: RunContext -> [ChatMessage] -> Maybe Text -> App (Either Text ChatResponse)
+handleChatWithContext ctx messages mTzName = do
+  let userMessages = [m | m <- messages, messageRole m == "user"]
+  case userMessages of
+    [] -> pure $ Left "No user message provided"
+    _ -> do
+      mTz <- case mTzName of
+        Nothing -> pure Nothing
+        Just tzName -> liftIO $ loadTimezone tzName
+
+      -- Get context for the agent
+      recentActivities <- getRecentActivities 24
+      stats <- getActivitySummaryStats
+
+      let systemPrompt = buildChatPrompt mTz recentActivities stats
+      let conversationPrompt = buildConversationPrompt messages
+
+      -- Call Claude with logging
+      result <- callClaudeLogged ctx systemPrompt conversationPrompt
+
+      case result of
+        Left err -> pure $ Left err
+        Right response -> do
+          case parseLLMResponse response of
+            Left err -> pure $ Left err
+            Right llmResp -> do
+              case llmToolCall llmResp of
+                Nothing -> pure $ Right $ Chat.ChatResponse (llmMessage llmResp) Nothing
+                Just toolCall -> do
+                  toolResult <- executeToolCallLogged ctx mTz toolCall
+                  case toolResult of
+                    ToolSuccess _ -> pure $ Right $ Chat.ChatResponse (llmMessage llmResp) Nothing
+                    ToolError err -> pure $ Left err
+
+-- | Execute tool call with logging
+executeToolCallLogged :: RunContext -> Maybe TZ -> InsightsToolCall -> App ToolResult
+executeToolCallLogged ctx mTz toolCall = do
+  let toolName = case toolCall of
+        SearchActivities {} -> "search_activities"
+        GetSummary {} -> "get_summary"
+        GetPeopleInsights {} -> "get_people_insights"
+
+  _ <- logToolRequest ctx toolName (toJSON toolCall)
+  result <- executeToolCall mTz toolCall
+
+  case result of
+    ToolSuccess val -> do
+      logToolSuccess ctx toolName val
+      pure result
+    ToolError err -> do
+      logToolFailure ctx toolName err
+      pure result
 
 buildConversationPrompt :: [ChatMessage] -> Text
 buildConversationPrompt msgs = T.unlines
