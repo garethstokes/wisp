@@ -32,6 +32,7 @@ executable wisp-srv
         Agents.Dispatcher
         Agents.Housekeeper
         Agents.Insights
+        Agents.Run
         Agents.Scheduler
         App.Config
         App.Monad
@@ -131,6 +132,7 @@ test-suite wisp-srv-test
         Agents.Housekeeper
         Agents.Insights
         Agents.InsightsSpec
+        Agents.Run
         Agents.Scheduler
         Agents.SchedulerSpec
         Domain.Account
