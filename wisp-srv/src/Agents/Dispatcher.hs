@@ -30,7 +30,7 @@ getAgent aid = case [a | a <- allAgents, agentId a == aid] of
 -- | Dispatch chat to the appropriate agent
 -- timezone: Optional IANA timezone for converting dates to local time in agent context
 dispatchChat :: Text -> [ChatMessage] -> Maybe Text -> App (Either Text ChatResponse)
-dispatchChat agent msgs tz = withRunLogging agent Nothing msgs $ \messages ->
+dispatchChat agent msgs tz = withRunLogging agent Nothing msgs $ \_ctx messages ->
   case agent of
     "wisp/concierge" -> Concierge.handleChat messages tz
     "wisp/scheduler" -> Scheduler.handleChat messages tz
