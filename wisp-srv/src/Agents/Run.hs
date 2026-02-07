@@ -32,14 +32,20 @@ data RunContext = RunContext
 -- Creates a run, logs the input event, delegates to the agent,
 -- and logs the outcome (completed/failed)
 withRunLogging
-  :: Text                                         -- ^ Agent ID (e.g., "wisp/concierge")
-  -> Maybe Text                                   -- ^ Session ID
-  -> [ChatMessage]                                -- ^ Input messages
-  -> ([ChatMessage] -> App (Either Text ChatResponse))  -- ^ The agent's handleChat
+  :: Text                                                    -- ^ Agent ID (e.g., "wisp/concierge")
+  -> Maybe Text                                              -- ^ Session ID
+  -> [ChatMessage]                                           -- ^ Input messages
+  -> (RunContext -> [ChatMessage] -> App (Either Text ChatResponse))  -- ^ Handler receives context
   -> App (Either Text ChatResponse)
 withRunLogging agentId mSessionId messages handleChat = do
   -- Create the run
   runId <- createRun agentId mSessionId Nothing
+
+  -- Build run context
+  let ctx = RunContext
+        { rcRunId = runId
+        , rcSessionId = mSessionId
+        }
 
   -- Log input event
   now <- liftIO getCurrentTime
@@ -54,8 +60,8 @@ withRunLogging agentId mSessionId messages handleChat = do
         }
   _ <- appendEvent runId inputEvent
 
-  -- Delegate to actual handler
-  result <- handleChat messages
+  -- Delegate to actual handler with context
+  result <- handleChat ctx messages
 
   -- Log outcome
   case result of
