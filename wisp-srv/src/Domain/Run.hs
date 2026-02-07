@@ -10,8 +10,9 @@ module Domain.Run
   , eventTypeToText
   ) where
 
-import Data.Aeson (ToJSON(..), FromJSON(..), Value, withText, object, (.=))
+import Data.Aeson (ToJSON(..), FromJSON(..), Value, withText, withObject, object, (.=), (.:), (.:?))
 import Data.Text (Text)
+import qualified Data.Text as T
 import Data.Time (UTCTime)
 import Database.PostgreSQL.Simple.ToField (ToField(..))
 import Database.PostgreSQL.Simple.FromField (FromField(..))
@@ -161,6 +162,49 @@ instance ToJSON RunEvent where
       , "tool_name" .= eventToolName
       , "error" .= eventError
       ]
+
+instance FromJSON RunEvent where
+  parseJSON = withObject "RunEvent" $ \v -> do
+    eventType <- v .: "type"
+    case (eventType :: Text) of
+      "input" -> InputEvent
+        <$> v .: "id"
+        <*> v .:? "parent_event_id"
+        <*> v .: "timestamp"
+        <*> v .: "tool"
+        <*> v .: "data"
+      "context_assembled" -> ContextAssembled
+        <$> v .: "id"
+        <*> v .:? "parent_event_id"
+        <*> v .: "timestamp"
+        <*> v .: "context"
+      "llm_called" -> LlmCalled
+        <$> v .: "id"
+        <*> v .:? "parent_event_id"
+        <*> v .: "timestamp"
+        <*> v .: "model"
+        <*> v .: "system_prompt"
+        <*> v .: "user_prompt"
+        <*> v .: "raw_response"
+      "tool_requested" -> ToolRequested
+        <$> v .: "id"
+        <*> v .:? "parent_event_id"
+        <*> v .: "timestamp"
+        <*> v .: "tool_name"
+        <*> v .: "tool_args"
+      "tool_succeeded" -> ToolSucceeded
+        <$> v .: "id"
+        <*> v .:? "parent_event_id"
+        <*> v .: "timestamp"
+        <*> v .: "tool_name"
+        <*> v .: "result"
+      "tool_failed" -> ToolFailed
+        <$> v .: "id"
+        <*> v .:? "parent_event_id"
+        <*> v .: "timestamp"
+        <*> v .: "tool_name"
+        <*> v .: "error"
+      _ -> fail $ "Unknown event type: " <> T.unpack eventType
 
 -- | Full run with events
 data Run = Run
