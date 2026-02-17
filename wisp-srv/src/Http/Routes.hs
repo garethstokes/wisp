@@ -11,6 +11,7 @@ import Http.Handlers.Activities (getActivities, getActivityStats, getActivityByI
 import Http.Handlers.Chat (postChat)
 import Http.Handlers.People (getPeople, getPersonById)
 import Http.Handlers.Pipeline (postRunPipeline, postClassifyActivity)
+import Http.Handlers.Runs (getRuns, getRunById)
 import App.Monad (Env)
 
 routes :: ScottyT (ReaderT Env IO) ()
@@ -51,3 +52,7 @@ routes = do
   -- Classification pipeline
   post "/pipeline/run" postRunPipeline
   post "/activities/:id/classify" postClassifyActivity
+
+  -- Agent runs
+  get "/runs" getRuns
+  get "/runs/:id" getRunById

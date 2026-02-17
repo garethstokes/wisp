@@ -62,11 +62,15 @@ generateSummary activities = do
         , "Keep it under 3 sentences."
         , "Don't use bullet points. Write conversationally."
         ]
-  liftIO $ callClaudeWithSystem
+  result <- liftIO $ callClaudeWithSystem
     (apiKey claudeCfg)
     (model claudeCfg)
     systemPrompt
     prompt
+  -- Extract just the text, discarding token counts
+  pure $ case result of
+    Left err -> Left err
+    Right (text, _, _) -> Right text
   where
     formatItem a = "- " <> fromMaybe "(no title)" (activityTitle a)
       <> maybe "" (\s -> " (from: " <> s <> ")") (activitySenderEmail a)

@@ -362,8 +362,8 @@ handleChat messages mTzName = do
 
       case result of
         Left err -> pure $ Left err
-        Right response -> do
-          -- Log the conversation
+        Right (response, _, _) -> do
+          -- Log the conversation (discard token counts - old code path)
           _ <- insertConversation query response
           -- Parse response
           case parseLLMResponse response of

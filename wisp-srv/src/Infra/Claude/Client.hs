@@ -1,6 +1,7 @@
 module Infra.Claude.Client
   ( ClaudeResponse(..)
   , ClaudeContent(..)
+  , ClaudeUsage(..)
   , callClaude
   , callClaudeWithSystem
   , responseText
@@ -28,10 +29,21 @@ instance FromJSON ClaudeContent where
     <$> v .: "type"
     <*> v .:? "text"
 
+data ClaudeUsage = ClaudeUsage
+  { usageInputTokens :: Int
+  , usageOutputTokens :: Int
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON ClaudeUsage where
+  parseJSON = withObject "ClaudeUsage" $ \v -> ClaudeUsage
+    <$> v .: "input_tokens"
+    <*> v .: "output_tokens"
+
 data ClaudeResponse = ClaudeResponse
   { responseContent :: [ClaudeContent]
   , responseModel :: Text
   , responseStopReason :: Maybe Text
+  , responseUsage :: Maybe ClaudeUsage
   } deriving (Show, Eq, Generic)
 
 instance FromJSON ClaudeResponse where
@@ -39,6 +51,7 @@ instance FromJSON ClaudeResponse where
     <$> v .: "content"
     <*> v .: "model"
     <*> v .:? "stop_reason"
+    <*> v .:? "usage"
 
 -- Extract text from response
 responseText :: ClaudeResponse -> Maybe Text
@@ -78,8 +91,8 @@ callClaude apiKey model prompt = do
       resp <- Aeson.decode body :: Maybe ClaudeResponse
       responseText resp
 
--- Call Claude API with system prompt
-callClaudeWithSystem :: Text -> Text -> Text -> Text -> IO (Either Text Text)
+-- Call Claude API with system prompt, returning text and usage data
+callClaudeWithSystem :: Text -> Text -> Text -> Text -> IO (Either Text (Text, Maybe Int, Maybe Int))
 callClaudeWithSystem apiKey model systemPrompt userMessage = do
   result <- try $ do
     manager <- newManager tlsManagerSettings
@@ -107,10 +120,13 @@ callClaudeWithSystem apiKey model systemPrompt userMessage = do
       let status = statusCode (responseStatus response)
       if status == 200
         then case decodeResponse (responseBody response) of
-          Just txt -> pure $ Right txt
+          Just result' -> pure $ Right result'
           Nothing -> pure $ Left "Failed to parse Claude response"
         else pure $ Left $ "Claude API error: " <> decodeUtf8 (toStrict $ responseBody response)
   where
     decodeResponse body = do
       resp <- Aeson.decode body :: Maybe ClaudeResponse
-      responseText resp
+      txt <- responseText resp
+      let inputTokens = usageInputTokens <$> responseUsage resp
+      let outputTokens = usageOutputTokens <$> responseUsage resp
+      pure (txt, inputTokens, outputTokens)

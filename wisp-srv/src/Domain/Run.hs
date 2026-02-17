@@ -78,6 +78,8 @@ data RunEvent
       , eventSystemPrompt :: Text
       , eventUserPrompt :: Text
       , eventRawResponse :: Text
+      , eventInputTokens :: Maybe Int
+      , eventOutputTokens :: Maybe Int
       }
   | ToolRequested
       { eventId :: Text
@@ -137,6 +139,8 @@ instance ToJSON RunEvent where
       , "system_prompt" .= eventSystemPrompt
       , "user_prompt" .= eventUserPrompt
       , "raw_response" .= eventRawResponse
+      , "input_tokens" .= eventInputTokens
+      , "output_tokens" .= eventOutputTokens
       ]
     ToolRequested {..} ->
       [ "type" .= ("tool_requested" :: Text)
@@ -186,6 +190,8 @@ instance FromJSON RunEvent where
         <*> v .: "system_prompt"
         <*> v .: "user_prompt"
         <*> v .: "raw_response"
+        <*> v .:? "input_tokens"
+        <*> v .:? "output_tokens"
       "tool_requested" -> ToolRequested
         <$> v .: "id"
         <*> v .:? "parent_event_id"

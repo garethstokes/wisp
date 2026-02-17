@@ -261,7 +261,7 @@ handleChat messages mTzName = do
 
       case result of
         Left err -> pure $ Left err
-        Right response -> do
+        Right (response, _, _) -> do
           _ <- insertConversation query response
           case parseLLMResponse response of
             Left err -> pure $ Left err

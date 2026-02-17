@@ -110,10 +110,12 @@ callClaudeLogged ctx systemPrompt userPrompt = do
             , eventSystemPrompt = systemPrompt
             , eventUserPrompt = userPrompt
             , eventRawResponse = "ERROR: " <> err
+            , eventInputTokens = Nothing
+            , eventOutputTokens = Nothing
             }
       _ <- appendEvent (rcRunId ctx) event
       pure $ Left err
-    Right response -> do
+    Right (response, inputTokens, outputTokens) -> do
       let event = LlmCalled
             { eventId = ""
             , eventParentEventId = Nothing
@@ -122,6 +124,8 @@ callClaudeLogged ctx systemPrompt userPrompt = do
             , eventSystemPrompt = systemPrompt
             , eventUserPrompt = userPrompt
             , eventRawResponse = response
+            , eventInputTokens = inputTokens
+            , eventOutputTokens = outputTokens
             }
       _ <- appendEvent (rcRunId ctx) event
       pure $ Right response

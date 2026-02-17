@@ -107,6 +107,8 @@ spec = describe "Run" $ do
             , eventSystemPrompt = "You are a helpful assistant"
             , eventUserPrompt = "Hello"
             , eventRawResponse = "Hi there!"
+            , eventInputTokens = Just 100
+            , eventOutputTokens = Just 50
             }
       let json = LBS.unpack (encode event)
       json `shouldContain` "\"type\":\"llm_called\""
@@ -116,7 +118,7 @@ spec = describe "Run" $ do
     it "returns correct type strings" $ do
       eventTypeToText (InputEvent "x" Nothing testTime "t" (object [])) `shouldBe` "input"
       eventTypeToText (ContextAssembled "x" Nothing testTime (object [])) `shouldBe` "context_assembled"
-      eventTypeToText (LlmCalled "x" Nothing testTime "m" "s" "u" "r") `shouldBe` "llm_called"
+      eventTypeToText (LlmCalled "x" Nothing testTime "m" "s" "u" "r" Nothing Nothing) `shouldBe` "llm_called"
       eventTypeToText (ToolRequested "x" Nothing testTime "t" (object [])) `shouldBe` "tool_requested"
       eventTypeToText (ToolSucceeded "x" Nothing testTime "t" (object [])) `shouldBe` "tool_succeeded"
       eventTypeToText (ToolFailed "x" Nothing testTime "t" "e") `shouldBe` "tool_failed"

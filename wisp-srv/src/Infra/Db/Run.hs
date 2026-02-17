@@ -5,6 +5,7 @@ module Infra.Db.Run
   , getRunEvents
   , getRunsBySession
   , getRunsByStatus
+  , getRecentRuns
   , updateRunStatus
   ) where
 
@@ -162,6 +163,17 @@ getRunsByStatus status = do
     events <- getRunEventsInternal conn (dbRunId dbRun)
     pure $ dbRunToRun dbRun events
     ) runs
+
+-- | Get recent runs (without events for list view)
+getRecentRuns :: Int -> App [Run]
+getRecentRuns limit = do
+  conn <- getConn
+  runs <- liftIO $ query conn
+    "SELECT id, parent_run_id, agent_id, session_id, status, created_at, updated_at \
+    \FROM agent_runs ORDER BY created_at DESC LIMIT ?"
+    (Only limit)
+  -- Return runs without loading events (for efficiency in list view)
+  pure $ map (`dbRunToRun` []) runs
 
 -- Conversion helpers
 dbRunToRun :: DbRun -> [RunEvent] -> Run

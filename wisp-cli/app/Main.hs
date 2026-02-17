@@ -39,6 +39,8 @@ data Command
   | Chat ChatOptions
   | Agents
   | Sessions SessionsOptions
+  | Runs
+  | Run Text
   | Help
   deriving (Show)
 
@@ -73,6 +75,8 @@ commandParser =
         <> command "poll" (info (pure Poll) (progDesc "Fetch new emails and calendar events now"))
         <> command "classify" (info (pure Classify) (progDesc "Run classification on pending activities"))
         <> command "auth" (info (pure Auth) (progDesc "Add a Google account via OAuth"))
+        <> command "runs" (info (pure Runs) (progDesc "List recent agent runs"))
+        <> command "run" (info runParser (progDesc "Show full details for an agent run"))
         <> command "help" (info (pure Help) (progDesc "Show this help"))
     )
 
@@ -104,6 +108,9 @@ approveParser = Approve <$> strArgument (metavar "ID" <> help "Activity ID to ap
 
 dismissParser :: Parser Command
 dismissParser = Dismiss <$> strArgument (metavar "ID" <> help "Activity ID to dismiss")
+
+runParser :: Parser Command
+runParser = Run <$> strArgument (metavar "ID" <> help "Run ID to show")
 
 -- Parser that defaults to Help when no command given
 commandParserWithDefault :: Parser Command
@@ -221,6 +228,8 @@ main = do
     Chat chatOpts -> runChatWithOptions cfg chatOpts
     Agents -> runAgents
     Sessions sessOpts -> runSessions sessOpts
+    Runs -> runRuns tz
+    Run rid -> runRun tz rid
     Help -> runHelp
 
 runHelp :: IO ()
@@ -247,6 +256,8 @@ runHelp = do
   TIO.putStrLn "  poll                Fetch new emails and events now"
   TIO.putStrLn "  classify            Run classification on pending activities"
   TIO.putStrLn "  auth                Add a Google account via OAuth"
+  TIO.putStrLn "  runs                List recent agent runs"
+  TIO.putStrLn "  run ID              Show full details for an agent run"
   TIO.putStrLn ""
   TIO.putStrLn "Examples:"
   TIO.putStrLn "  wisp chat -a wisp/concierge -m \"Show quarantined items\""
@@ -414,6 +425,16 @@ formatTimeLocal tz isoDate =
       let local = utcToLocal tz utc
           timeStr = T.pack $ show local -- "2026-02-04 14:30:00"
        in T.take 5 $ T.drop 11 timeStr -- "14:30"
+
+-- Parse ISO8601 UTC time and convert to local timezone, returning HH:MM:SS
+formatTimeWithSeconds :: TZ -> Text -> Text
+formatTimeWithSeconds tz isoDate =
+  case parseUtcTime isoDate of
+    Nothing -> T.take 8 $ T.drop 11 $ T.takeWhile (/= '.') isoDate -- fallback to raw extraction
+    Just utc ->
+      let local = utcToLocal tz utc
+          timeStr = T.pack $ show local -- "2026-02-04 14:30:00"
+       in T.take 8 $ T.drop 11 timeStr -- "14:30:00"
 
 -- Parse ISO8601 UTC time and convert to local, returning "Mon D HH:MM" or "Mon D"
 formatDateLocal :: TZ -> Text -> Text
@@ -899,3 +920,190 @@ showAccount (Object acc) = case KM.lookup "email" acc of
   Just (String email) -> TIO.putStrLn $ "            - " <> email
   _ -> return ()
 showAccount _ = return ()
+
+-- GET /runs - List recent agent runs
+runRuns :: TZ -> IO ()
+runRuns tz = do
+  manager <- newManager defaultManagerSettings
+  req <- parseRequest $ baseUrl <> "/runs"
+  response <- httpLbs req manager
+  case decode (responseBody response) of
+    Just (Object obj) -> case KM.lookup "runs" obj of
+      Just (Array runs) | not (null runs) -> do
+        TIO.putStrLn "Recent Agent Runs"
+        TIO.putStrLn "================="
+        TIO.putStrLn ""
+        mapM_ (showRunBrief tz) (toList runs)
+        case KM.lookup "count" obj of
+          Just (Number n) -> TIO.putStrLn $ "\nTotal: " <> showT (round n :: Int) <> " runs"
+          _ -> return ()
+      _ -> TIO.putStrLn "No runs found"
+    _ -> TIO.putStrLn "Failed to fetch runs"
+
+-- Show a brief run line
+showRunBrief :: TZ -> Value -> IO ()
+showRunBrief tz (Object run) = do
+  let getId = case KM.lookup "id" run of
+        Just (String s) -> s
+        _ -> "?"
+  let getAgent = case KM.lookup "agent" run of
+        Just (String s) -> s
+        _ -> "unknown"
+  let getStatus = case KM.lookup "status" run of
+        Just (String "running") -> "🔄"
+        Just (String "waiting") -> "⏸️"
+        Just (String "completed") -> "✅"
+        Just (String "failed") -> "❌"
+        _ -> "⚪"
+  let getCreated = case KM.lookup "created_at" run of
+        Just (String s) -> formatDateLocal tz s
+        _ -> ""
+  TIO.putStrLn $ "  " <> getStatus <> " " <> getCreated <> " [" <> getId <> "] " <> getAgent
+showRunBrief _ _ = return ()
+
+-- GET /runs/:id - Show full run with events
+runRun :: TZ -> Text -> IO ()
+runRun tz rid = do
+  manager <- newManager defaultManagerSettings
+  req <- parseRequest $ baseUrl <> "/runs/" <> unpack rid
+  response <- httpLbs req manager
+  case decode (responseBody response) of
+    Just (Object run) -> do
+      TIO.putStrLn "Run Details"
+      TIO.putStrLn "==========="
+      showField "ID" "id" run
+      showField "Agent" "agent" run
+      showField "Status" "status" run
+      showField "Session ID" "session_id" run
+      showDateField tz "Created" "created_at" run
+      showDateField tz "Updated" "updated_at" run
+      TIO.putStrLn ""
+      TIO.putStrLn "Events:"
+      TIO.putStrLn "-------"
+      case KM.lookup "events" run of
+        Just (Array events) | not (null events) -> mapM_ (showRunEvent tz) (toList events)
+        _ -> TIO.putStrLn "  No events"
+    _ -> TIO.putStrLn "❌ Failed to fetch run (not found or error)"
+
+-- Show a single run event
+showRunEvent :: TZ -> Value -> IO ()
+showRunEvent tz (Object event) = do
+  let getType = case KM.lookup "type" event of
+        Just (String s) -> s
+        _ -> "unknown"
+  let getTime = case KM.lookup "timestamp" event of
+        Just (String s) -> formatTimeWithSeconds tz s
+        _ -> "??:??:??"
+
+  case getType of
+    "input" -> do
+      let tool = case KM.lookup "tool" event of
+            Just (String s) -> s
+            _ -> "?"
+      TIO.putStrLn $ "  " <> getTime <> " 📥 Input from " <> tool
+      case KM.lookup "data" event of
+        Just (Object dataObj) -> do
+          TIO.putStrLn "    Data:"
+          forM_ (KM.toList dataObj) $ \(k, v) -> do
+            let valuePreview = case v of
+                  String s -> if T.length s > 100 then T.take 100 s <> "..." else s
+                  Number n -> showT n
+                  Bool b -> if b then "true" else "false"
+                  Null -> "null"
+                  Array arr -> "[" <> showT (length arr) <> " items]"
+                  Object obj -> "{" <> showT (length (KM.toList obj)) <> " fields}"
+            TIO.putStrLn $ "      " <> pack (show k) <> ": " <> valuePreview
+        _ -> return ()
+
+    "llm_called" -> do
+      let model = case KM.lookup "model" event of
+            Just (String s) -> s
+            _ -> "?"
+
+      -- Get token usage if available
+      let inputTokens = case KM.lookup "input_tokens" event of
+            Just (Number n) -> Just (round n :: Int)
+            _ -> Nothing
+      let outputTokens = case KM.lookup "output_tokens" event of
+            Just (Number n) -> Just (round n :: Int)
+            _ -> Nothing
+
+      let tokenInfo = case (inputTokens, outputTokens) of
+            (Just inp, Just out) ->
+              " [" <> showT inp <> " in, " <> showT out <> " out, " <> showT (inp + out) <> " total]"
+            _ -> ""
+
+      TIO.putStrLn $ "  " <> getTime <> " 🤖 LLM called (" <> model <> ")" <> tokenInfo
+
+      case KM.lookup "system_prompt" event of
+        Just (String sp) -> do
+          TIO.putStrLn "    System prompt:"
+          showWrappedText "      " sp 100
+        _ -> return ()
+
+      case KM.lookup "user_prompt" event of
+        Just (String up) -> do
+          TIO.putStrLn "    User prompt:"
+          showWrappedText "      " up 100
+        _ -> return ()
+
+      case KM.lookup "raw_response" event of
+        Just (String resp) -> do
+          TIO.putStrLn "    Response:"
+          showWrappedText "      " resp 80
+          TIO.putStrLn $ "    (Response length: " <> showT (T.length resp) <> " chars)"
+        _ -> return ()
+
+    "tool_requested" -> do
+      let toolName = case KM.lookup "tool_name" event of
+            Just (String s) -> s
+            _ -> "?"
+      TIO.putStrLn $ "  " <> getTime <> " 🔧 Tool requested: " <> toolName
+      case KM.lookup "tool_args" event of
+        Just v -> do
+          TIO.putStrLn "    Arguments:"
+          TIO.putStrLn $ "      " <> pack (show v)
+        _ -> return ()
+
+    "tool_succeeded" -> do
+      let toolName = case KM.lookup "tool_name" event of
+            Just (String s) -> s
+            _ -> "?"
+      TIO.putStrLn $ "  " <> getTime <> " ✅ Tool succeeded: " <> toolName
+      case KM.lookup "result" event of
+        Just v -> do
+          TIO.putStrLn "    Result:"
+          let resultStr = pack (show v)
+          if T.length resultStr > 500
+            then TIO.putStrLn $ "      " <> T.take 500 resultStr <> "... (truncated, " <> showT (T.length resultStr) <> " chars total)"
+            else TIO.putStrLn $ "      " <> resultStr
+        _ -> return ()
+
+    "tool_failed" -> do
+      let toolName = case KM.lookup "tool_name" event of
+            Just (String s) -> s
+            _ -> "?"
+      let err = case KM.lookup "error" event of
+            Just (String s) -> s
+            _ -> "?"
+      TIO.putStrLn $ "  " <> getTime <> " ❌ Tool failed: " <> toolName
+      TIO.putStrLn $ "    Error: " <> err
+
+    "context_assembled" -> do
+      TIO.putStrLn $ "  " <> getTime <> " 📋 Context assembled"
+      case KM.lookup "context" event of
+        Just (Object ctx) -> do
+          TIO.putStrLn $ "    Context fields: " <> showT (length (KM.toList ctx))
+        _ -> return ()
+
+    _ -> TIO.putStrLn $ "  " <> getTime <> " ❓ " <> getType
+showRunEvent _ _ = return ()
+
+-- Helper to show text with line wrapping and maximum number of lines
+showWrappedText :: Text -> Text -> Int -> IO ()
+showWrappedText prefix text maxLines = do
+  let textLines = T.lines text
+  let linesToShow = take maxLines textLines
+  forM_ linesToShow $ \line -> TIO.putStrLn $ prefix <> line
+  when (length textLines > maxLines) $
+    TIO.putStrLn $ prefix <> "... (" <> showT (length textLines - maxLines) <> " more lines)"
