@@ -48,6 +48,7 @@ executable wisp-srv
         Domain.Run
         Domain.Schema
         Domain.Session
+        Domain.Skill
         Domain.Soul
         Domain.Summary
         Http.Handlers.Activities
@@ -164,6 +165,8 @@ test-suite wisp-srv-test
         Domain.SchemaSpec
         Domain.Session
         Domain.SessionSpec
+        Domain.Skill
+        Domain.SkillSpec
         Domain.Soul
         Domain.SoulSpec
         Domain.Summary
