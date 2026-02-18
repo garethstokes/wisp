@@ -3,21 +3,26 @@
 -- These enable working with the knowledge system and skill activation.
 module Skills.Base
   ( baseToolNames
+  , baseToolNamesWithSkill
   , BaseToolCall(..)
   , BaseToolResult(..)
   , parseBaseToolCall
   , executeBaseTool
+  , activateAgentSkill
+  , deactivateAgentSkill
   ) where
 
-import Data.Aeson (FromJSON(..), ToJSON(..), Result(..), Value(..), fromJSON, object, withObject, (.:), (.:?), (.=))
+import Data.Aeson (FromJSON(..), ToJSON(..), Result(..), Value(..), encode, decode, fromJSON, object, withObject, (.:), (.:?), (.=))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Domain.Id (EntityId)
+import Domain.Agent (AgentName, AgentConfig(..), agentTag)
+import qualified Domain.Activity
 import App.Monad (App)
-import Infra.Db.Activity (insertNote, getActivitiesByTags, getActivity)
+import Infra.Db.Activity (insertNote, getActivitiesByTags, getActivity, updateActivityRaw)
 import Skills.Registry (allSkillNames)
 
--- | Tools available to all agents (without skills)
+-- | Tools available to all agents (without an active skill)
 baseToolNames :: [Text]
 baseToolNames =
   [ "search_knowledge"
@@ -26,12 +31,22 @@ baseToolNames =
   , "activate_skill"
   ]
 
+-- | Tools available when a skill is active (adds deactivate)
+baseToolNamesWithSkill :: [Text]
+baseToolNamesWithSkill =
+  [ "search_knowledge"
+  , "read_note"
+  , "add_note"
+  , "deactivate_skill"
+  ]
+
 -- | Parsed base tool call
 data BaseToolCall
   = SearchKnowledge [Text] Int    -- ^ tags, limit
   | ReadNote EntityId             -- ^ note ID
   | AddNote Text [Text]           -- ^ content, tags
   | ActivateSkill Text            -- ^ skill name
+  | DeactivateSkill               -- ^ deactivate current skill
   deriving (Show, Eq)
 
 -- | Result of executing a base tool
@@ -56,6 +71,7 @@ parseBaseToolCall "search_knowledge" args = parseSearchKnowledge args
 parseBaseToolCall "read_note" args = parseReadNote args
 parseBaseToolCall "add_note" args = parseAddNote args
 parseBaseToolCall "activate_skill" args = parseActivateSkill args
+parseBaseToolCall "deactivate_skill" _ = Right DeactivateSkill
 parseBaseToolCall name _ = Left $ "Unknown base tool: " <> name
 
 -- Internal argument types for parsing
@@ -141,3 +157,55 @@ executeBaseTool accountId tool = case tool of
         ("activate_skill:" <> skillName)
         ("Activate " <> skillName <> " skill?")
       else pure $ ToolError $ "Unknown skill: " <> skillName
+
+  DeactivateSkill ->
+    pure $ PermissionRequest
+      "deactivate_skill"
+      "Deactivate current skill?"
+
+-- | Activate a skill for an agent
+-- Updates the agent's note in knowledge to set active_skill
+activateAgentSkill :: EntityId -> AgentName -> Text -> App (Either Text ())
+activateAgentSkill accountId agentName skillName = do
+  if skillName `notElem` allSkillNames
+    then pure $ Left $ "Unknown skill: " <> skillName
+    else do
+      -- Find the agent's note
+      let tags = [agentTag agentName]
+      notes <- getActivitiesByTags accountId tags 1
+      case notes of
+        [] -> pure $ Left $ "Agent not found: " <> agentName
+        (note:_) -> do
+          -- Update the agent config with the new active skill
+          let rawValue = activityRaw note
+              mConfig = decode (encode rawValue) :: Maybe AgentConfig
+              newConfig = case mConfig of
+                Just c -> c { agentActiveSkill = Just skillName }
+                Nothing -> AgentConfig "" (Just skillName)
+          updateActivityRaw (activityId note) (toJSON newConfig)
+          pure $ Right ()
+  where
+    activityRaw = Domain.Activity.activityRaw
+    activityId = Domain.Activity.activityId
+
+-- | Deactivate the current skill for an agent
+-- Updates the agent's note in knowledge to clear active_skill
+deactivateAgentSkill :: EntityId -> AgentName -> App (Either Text ())
+deactivateAgentSkill accountId agentName = do
+  -- Find the agent's note
+  let tags = [agentTag agentName]
+  notes <- getActivitiesByTags accountId tags 1
+  case notes of
+    [] -> pure $ Left $ "Agent not found: " <> agentName
+    (note:_) -> do
+      -- Update the agent config to clear the active skill
+      let rawValue = activityRaw note
+          mConfig = decode (encode rawValue) :: Maybe AgentConfig
+          newConfig = case mConfig of
+            Just c -> c { agentActiveSkill = Nothing }
+            Nothing -> AgentConfig "" Nothing
+      updateActivityRaw (activityId note) (toJSON newConfig)
+      pure $ Right ()
+  where
+    activityRaw = Domain.Activity.activityRaw
+    activityId = Domain.Activity.activityId

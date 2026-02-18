@@ -18,6 +18,7 @@ module Infra.Db.Activity
   , updateActivityStatus
   , updateActivityClassification
   , updateActivityTags
+  , updateActivityRaw
   , searchActivities
   , getActivitySummaryStats
   , getActivitiesByTags
@@ -498,4 +499,13 @@ updateActivityTags aid tagNames = do
   _ <- liftIO $ execute conn
     "UPDATE activities SET tags = ?, updated_at = now() WHERE id = ?"
     (PGArray normalizedTags, unEntityId aid)
+  pure ()
+
+-- Update raw JSON for an activity (used for agent config updates)
+updateActivityRaw :: EntityId -> Value -> App ()
+updateActivityRaw aid rawValue = do
+  conn <- getConn
+  _ <- liftIO $ execute conn
+    "UPDATE activities SET raw = ?, updated_at = now() WHERE id = ?"
+    (rawValue, unEntityId aid)
   pure ()
