@@ -37,7 +37,10 @@ data Command
   | Activity Text
   | Logs Text
   | Chat ChatOptions
-  | Agents
+  | Agents (Maybe Text)           -- List agents or show one
+  | Skills (Maybe Text)           -- List skills or show one
+  | Activate Text Text            -- agent skill
+  | Deactivate Text               -- agent
   | Sessions SessionsOptions
   | Runs
   | Run Text
@@ -69,7 +72,10 @@ commandParser =
         <> command "approve" (info approveParser (progDesc "Move quarantined activity to surfaced"))
         <> command "dismiss" (info dismissParser (progDesc "Archive an activity"))
         <> command "chat" (info chatOptionsParser (progDesc "Chat with an agent"))
-        <> command "agents" (info (pure Agents) (progDesc "List available agents"))
+        <> command "agents" (info agentsParser (progDesc "List agents or show agent details"))
+        <> command "skills" (info skillsParser (progDesc "List skills or show skill details"))
+        <> command "activate" (info activateParser (progDesc "Activate a skill for an agent"))
+        <> command "deactivate" (info deactivateParser (progDesc "Deactivate current skill for an agent"))
         <> command "sessions" (info sessionsParser (progDesc "Manage chat sessions"))
         <> command "people" (info (pure People) (progDesc "List contacts extracted from activities"))
         <> command "poll" (info (pure Poll) (progDesc "Fetch new emails and calendar events now"))
@@ -111,6 +117,20 @@ dismissParser = Dismiss <$> strArgument (metavar "ID" <> help "Activity ID to di
 
 runParser :: Parser Command
 runParser = Run <$> strArgument (metavar "ID" <> help "Run ID to show")
+
+agentsParser :: Parser Command
+agentsParser = Agents <$> optional (strArgument (metavar "NAME" <> help "Agent name to show details"))
+
+skillsParser :: Parser Command
+skillsParser = Skills <$> optional (strArgument (metavar "NAME" <> help "Skill name to show details"))
+
+activateParser :: Parser Command
+activateParser = Activate
+  <$> strArgument (metavar "AGENT" <> help "Agent name")
+  <*> strArgument (metavar "SKILL" <> help "Skill to activate")
+
+deactivateParser :: Parser Command
+deactivateParser = Deactivate <$> strArgument (metavar "AGENT" <> help "Agent name")
 
 -- Parser that defaults to Help when no command given
 commandParserWithDefault :: Parser Command
@@ -226,7 +246,10 @@ main = do
     Activity aid -> runActivity tz aid
     Logs aid -> runLogs aid
     Chat chatOpts -> runChatWithOptions cfg chatOpts
-    Agents -> runAgents
+    Agents mName -> runAgents mName
+    Skills mName -> runSkills mName
+    Activate agent skill -> runActivate agent skill
+    Deactivate agent -> runDeactivate agent
     Sessions sessOpts -> runSessions sessOpts
     Runs -> runRuns tz
     Run rid -> runRun tz rid
@@ -250,6 +273,11 @@ runHelp = do
   TIO.putStrLn "    -s, --session     Session name (default: \"default\")"
   TIO.putStrLn "    --new             Start fresh session"
   TIO.putStrLn "  agents              List available agents"
+  TIO.putStrLn "  agents NAME         Show agent details"
+  TIO.putStrLn "  skills              List available skills"
+  TIO.putStrLn "  skills NAME         Show skill details and prompt"
+  TIO.putStrLn "  activate AGENT SKILL  Activate a skill for an agent"
+  TIO.putStrLn "  deactivate AGENT    Deactivate current skill for agent"
   TIO.putStrLn "  sessions            List chat sessions"
   TIO.putStrLn "    -d, --delete      Delete a session"
   TIO.putStrLn "  people              List contacts from activities"
@@ -260,10 +288,13 @@ runHelp = do
   TIO.putStrLn "  run ID              Show full details for an agent run"
   TIO.putStrLn ""
   TIO.putStrLn "Examples:"
-  TIO.putStrLn "  wisp chat -a wisp/concierge -m \"Show quarantined items\""
-  TIO.putStrLn "  wisp chat -a wisp/concierge -m \"Approve them\" -s work"
-  TIO.putStrLn "  wisp agents"
-  TIO.putStrLn "  wisp sessions"
+  TIO.putStrLn "  wisp agents                           List all agents"
+  TIO.putStrLn "  wisp agents wisp                      Show wisp agent details"
+  TIO.putStrLn "  wisp skills                           List all skills"
+  TIO.putStrLn "  wisp skills concierge                 Show concierge skill"
+  TIO.putStrLn "  wisp activate wisp concierge          Activate concierge for wisp"
+  TIO.putStrLn "  wisp deactivate wisp                  Deactivate wisp's skill"
+  TIO.putStrLn "  wisp chat -a wisp/concierge -m \"hi\"   Chat with agent"
   TIO.putStrLn ""
   TIO.putStrLn "Activity IDs are shown in brackets, e.g. [abc123]"
 
@@ -662,10 +693,11 @@ showLogEntry (Object log') = do
     Nothing -> return ()
 showLogEntry _ = return ()
 
-runAgents :: IO ()
-runAgents = do
+runAgents :: Maybe Text -> IO ()
+runAgents Nothing = do
+  -- List all agents from new API
   manager <- newManager defaultManagerSettings
-  req <- parseRequest $ baseUrl <> "/agents"
+  req <- parseRequest $ baseUrl <> "/api/agents"
   response <- httpLbs req manager
   case decode (responseBody response) of
     Just (Object obj) -> case KM.lookup "agents" obj of
@@ -673,33 +705,172 @@ runAgents = do
         TIO.putStrLn "Available Agents"
         TIO.putStrLn "================"
         TIO.putStrLn ""
-        mapM_ showAgent (toList agents)
+        if null agents
+          then TIO.putStrLn "No agents found. Run seeds to create default agent."
+          else mapM_ showAgentName (toList agents)
       _ -> TIO.putStrLn "No agents found"
     _ -> TIO.putStrLn "Failed to fetch agents"
+runAgents (Just name) = do
+  -- Show single agent details
+  manager <- newManager defaultManagerSettings
+  req <- parseRequest $ baseUrl <> "/api/agents/" <> unpack name
+  response <- httpLbs req manager
+  case decode (responseBody response) of
+    Just (Object agent) -> do
+      case KM.lookup "error" agent of
+        Just (String err) -> TIO.putStrLn $ "Error: " <> err
+        _ -> showAgentDetail agent
+    _ -> TIO.putStrLn $ "Failed to fetch agent: " <> name
 
-showAgent :: Value -> IO ()
-showAgent (Object a) = do
-  let getId = case KM.lookup "id" a of
+showAgentName :: Value -> IO ()
+showAgentName (String name) = TIO.putStrLn $ "  " <> name
+showAgentName _ = return ()
+
+showAgentDetail :: KM.KeyMap Value -> IO ()
+showAgentDetail agent = do
+  let getName = case KM.lookup "name" agent of
         Just (String s) -> s
         _ -> "?"
-  let getDesc = case KM.lookup "description" a of
+  let getPersonality = case KM.lookup "personality" agent of
+        Just (String s) -> s
+        Just Null -> "(none)"
+        _ -> "(none)"
+  let getActiveSkill = case KM.lookup "active_skill" agent of
+        Just (String s) -> Just s
+        _ -> Nothing
+  let getAvailableSkills = case KM.lookup "available_skills" agent of
+        Just (Array ss) -> [s | String s <- toList ss]
+        _ -> []
+
+  TIO.putStrLn $ "Agent: " <> getName
+  TIO.putStrLn "========"
+  TIO.putStrLn ""
+  TIO.putStrLn $ "Personality: " <> getPersonality
+  TIO.putStrLn ""
+  case getActiveSkill of
+    Just skill -> TIO.putStrLn $ "Active Skill: " <> skill
+    Nothing -> TIO.putStrLn "Active Skill: (none)"
+  TIO.putStrLn ""
+  TIO.putStrLn $ "Available Skills: " <> T.intercalate ", " getAvailableSkills
+  TIO.putStrLn ""
+
+  -- Show soul info if present
+  case KM.lookup "soul" agent of
+    Just (Object soul) -> do
+      TIO.putStrLn "Soul:"
+      case KM.lookup "personality" soul of
+        Just (String p) | not (T.null p) -> TIO.putStrLn $ "  Communication style: " <> p
+        _ -> return ()
+      case KM.lookup "insights" soul of
+        Just (Array insights) | not (null insights) -> do
+          TIO.putStrLn "  Insights:"
+          forM_ (toList insights) $ \i -> case i of
+            String s -> TIO.putStrLn $ "    - " <> s
+            _ -> return ()
+        _ -> return ()
+    _ -> return ()
+
+runSkills :: Maybe Text -> IO ()
+runSkills Nothing = do
+  -- List all skills
+  manager <- newManager defaultManagerSettings
+  req <- parseRequest $ baseUrl <> "/api/skills"
+  response <- httpLbs req manager
+  case decode (responseBody response) of
+    Just (Object obj) -> case KM.lookup "skills" obj of
+      Just (Array skills) -> do
+        TIO.putStrLn "Available Skills"
+        TIO.putStrLn "================"
+        TIO.putStrLn ""
+        mapM_ showSkillBrief (toList skills)
+      _ -> TIO.putStrLn "No skills found"
+    _ -> TIO.putStrLn "Failed to fetch skills"
+runSkills (Just name) = do
+  -- Show single skill details
+  manager <- newManager defaultManagerSettings
+  req <- parseRequest $ baseUrl <> "/api/skills/" <> unpack name
+  response <- httpLbs req manager
+  case decode (responseBody response) of
+    Just (Object skill) -> do
+      case KM.lookup "error" skill of
+        Just (String err) -> TIO.putStrLn $ "Error: " <> err
+        _ -> showSkillDetail skill
+    _ -> TIO.putStrLn $ "Failed to fetch skill: " <> name
+
+showSkillBrief :: Value -> IO ()
+showSkillBrief (Object s) = do
+  let getName = case KM.lookup "name" s of
+        Just (String n) -> n
+        _ -> "?"
+  let getTools = case KM.lookup "tools" s of
+        Just (Array ts) -> [t | String t <- toList ts]
+        _ -> []
+  let getAvailable = case KM.lookup "available" s of
+        Just (Bool True) -> ""
+        _ -> " [not available]"
+  TIO.putStrLn $ "  " <> getName <> getAvailable
+  TIO.putStrLn $ "    Tools: " <> T.intercalate ", " getTools
+showSkillBrief _ = return ()
+
+showSkillDetail :: KM.KeyMap Value -> IO ()
+showSkillDetail skill = do
+  let getName = case KM.lookup "name" skill of
+        Just (String s) -> s
+        _ -> "?"
+  let getTools = case KM.lookup "tools" skill of
+        Just (Array ts) -> [t | String t <- toList ts]
+        _ -> []
+  let getTag = case KM.lookup "tag" skill of
         Just (String s) -> s
         _ -> ""
-  let getImpl = case KM.lookup "implemented" a of
-        Just (Bool True) -> ""
-        _ -> " [not implemented]"
-  let getTools = case KM.lookup "tools" a of
-        Just (Array ts) -> [n | Object t <- toList ts, Just (String n) <- [KM.lookup "name" t]]
-        _ -> []
-  let getWorkflows = case KM.lookup "workflows" a of
-        Just (Array ws) -> [w | String w <- toList ws]
-        _ -> []
-  TIO.putStrLn $ getId <> getImpl
-  TIO.putStrLn $ "  " <> getDesc
-  TIO.putStrLn $ "  Tools: " <> T.intercalate ", " getTools
-  TIO.putStrLn $ "  Workflows: " <> T.intercalate ", " getWorkflows
+
+  TIO.putStrLn $ "Skill: " <> getName
+  TIO.putStrLn "========"
   TIO.putStrLn ""
-showAgent _ = return ()
+  TIO.putStrLn $ "Tag: " <> getTag
+  TIO.putStrLn $ "Tools: " <> T.intercalate ", " getTools
+  TIO.putStrLn ""
+
+  case KM.lookup "prompt" skill of
+    Just (String prompt) -> do
+      TIO.putStrLn "Prompt:"
+      TIO.putStrLn "-------"
+      TIO.putStrLn prompt
+    Just Null -> TIO.putStrLn "Prompt: (not set - run seeds to initialize)"
+    _ -> TIO.putStrLn "Prompt: (not set)"
+
+runActivate :: Text -> Text -> IO ()
+runActivate agent skill = do
+  manager <- newManager defaultManagerSettings
+  initialReq <- parseRequest $ baseUrl <> "/api/agents/" <> unpack agent <> "/activate/" <> unpack skill
+  let reqBody = object ["confirm" .= True]
+  let req = initialReq
+        { method = "POST"
+        , requestHeaders = [("Content-Type", "application/json")]
+        , requestBody = RequestBodyLBS (encode reqBody)
+        }
+  response <- httpLbs req manager
+  case decode (responseBody response) of
+    Just (Object obj) -> case KM.lookup "status" obj of
+      Just (String "activated") -> TIO.putStrLn $ "✅ Activated " <> skill <> " for agent " <> agent
+      _ -> case KM.lookup "error" obj of
+        Just (String err) -> TIO.putStrLn $ "❌ Error: " <> err
+        _ -> TIO.putStrLn "Activation request sent"
+    _ -> TIO.putStrLn "❌ Failed to activate skill"
+
+runDeactivate :: Text -> IO ()
+runDeactivate agent = do
+  manager <- newManager defaultManagerSettings
+  initialReq <- parseRequest $ baseUrl <> "/api/agents/" <> unpack agent <> "/deactivate"
+  let req = initialReq { method = "POST" }
+  response <- httpLbs req manager
+  case decode (responseBody response) of
+    Just (Object obj) -> case KM.lookup "status" obj of
+      Just (String "deactivated") -> TIO.putStrLn $ "✅ Deactivated skill for agent " <> agent
+      _ -> case KM.lookup "error" obj of
+        Just (String err) -> TIO.putStrLn $ "❌ Error: " <> err
+        _ -> TIO.putStrLn "Deactivation request sent"
+    _ -> TIO.putStrLn "❌ Failed to deactivate skill"
 
 runChatWithOptions :: CliConfig -> ChatOptions -> IO ()
 runChatWithOptions cfg chatOpts = do
