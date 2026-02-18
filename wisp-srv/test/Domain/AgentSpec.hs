@@ -28,3 +28,22 @@ spec = describe "Agent" $ do
             }
       let json = encode agent
       decode json `shouldBe` Just agent
+
+  describe "AgentConfig" $ do
+    it "parses agent name from tag" $ do
+      parseAgentTag "agent:jarvis" `shouldBe` Just "jarvis"
+      parseAgentTag "other" `shouldBe` Nothing
+
+    it "round-trips AgentConfig through JSON" $ do
+      let config = AgentConfig
+            { agentPersonalitySeed = "Formal, concise"
+            , agentActiveSkill = Just "concierge"
+            }
+      decode (encode config) `shouldBe` Just config
+
+    it "parses AgentConfig with null active_skill" $ do
+      let config = AgentConfig
+            { agentPersonalitySeed = "Helpful"
+            , agentActiveSkill = Nothing
+            }
+      decode (encode config) `shouldBe` Just config
