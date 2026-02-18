@@ -33,6 +33,7 @@ executable wisp-srv
         Skills.Concierge.Classifier
         Skills.Housekeeper
         Skills.Insights
+        Skills.Registry
         Skills.Scheduler
         App.Config
         App.Monad
@@ -141,6 +142,7 @@ test-suite wisp-srv-test
         Skills.Housekeeper
         Skills.Insights
         Skills.InsightsSpec
+        Skills.Registry
         Skills.Scheduler
         Skills.SchedulerSpec
         Domain.Account
