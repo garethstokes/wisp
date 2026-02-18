@@ -1,4 +1,4 @@
-module Agents.Concierge
+module Skills.Concierge
   ( -- Deterministic flows
     classifyAllPending
   , classifyPending
@@ -44,7 +44,7 @@ import Infra.Db.Person (searchPeople, getPersonByEmail)
 import Infra.Db.Receipt (insertReceipt)
 import Infra.Claude.Client (callClaudeWithSystem)
 import Agents.Run (RunContext(..), callClaudeLogged, logToolRequest, logToolSuccess, logToolFailure)
-import Agents.Concierge.Classifier (classifyActivity)
+import Skills.Concierge.Classifier (classifyActivity)
 import Domain.Agent (AgentInfo(..), ToolInfo(..), ToolType(..))
 import Domain.Chat (ChatMessage(..), ChatResponse)
 import qualified Domain.Chat as Chat

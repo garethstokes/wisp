@@ -1,7 +1,7 @@
-module Agents.Concierge.ClassifierSpec where
+module Skills.Concierge.ClassifierSpec where
 
 import Test.Hspec
-import Agents.Concierge.Classifier (buildClassificationPrompt, parseClassificationResponse)
+import Skills.Concierge.Classifier (buildClassificationPrompt, parseClassificationResponse)
 import Domain.Classification (Classification(..), ActivityType(..))
 import Data.Aeson (object, (.=))
 import qualified Data.Text as T

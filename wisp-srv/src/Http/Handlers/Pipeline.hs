@@ -12,7 +12,7 @@ import Web.Scotty.Trans (ActionT, json, status, captureParam)
 import App.Env (Env)
 import Domain.Id (EntityId(..))
 import Infra.Db.Activity (getActivity)
-import Agents.Concierge (classifyAllPending, classifyPending)
+import Skills.Concierge (classifyAllPending, classifyPending)
 
 -- POST /pipeline/run - Run pipeline on pending activities
 postRunPipeline :: ActionT (ReaderT Env IO) ()

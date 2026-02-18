@@ -21,7 +21,7 @@ import Infra.Db.Migrations (runMigrations)
 import Services.Scheduler (startPolling)
 import Services.NotificationLoop (startNotificationLoop)
 import Services.ClassificationQueue (enqueueActivities, dequeueActivity)
-import Agents.Concierge (classifyPending)
+import Skills.Concierge (classifyPending)
 
 main :: IO ()
 main = do

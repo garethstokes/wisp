@@ -8,10 +8,10 @@ import Data.Text (Text)
 import Domain.Agent (AgentInfo(..))
 import Domain.Chat (ChatMessage, ChatResponse)
 import App.Monad (App)
-import qualified Agents.Concierge as Concierge
-import qualified Agents.Scheduler as Scheduler
-import qualified Agents.Housekeeper as Housekeeper
-import qualified Agents.Insights as Insights
+import qualified Skills.Concierge as Concierge
+import qualified Skills.Scheduler as Scheduler
+import qualified Skills.Housekeeper as Housekeeper
+import qualified Skills.Insights as Insights
 import Agents.Run (withRunLogging)
 
 allAgents :: [AgentInfo]

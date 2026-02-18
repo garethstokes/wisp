@@ -1,9 +1,9 @@
-module Agents.InsightsSpec (spec) where
+module Skills.InsightsSpec (spec) where
 
 import Test.Hspec
 import Data.Aeson (decode, encode, object, (.=))
 
-import Agents.Insights
+import Skills.Insights
 import Domain.Agent (agentId, agentImplemented)
 
 spec :: Spec

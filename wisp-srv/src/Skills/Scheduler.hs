@@ -1,4 +1,4 @@
-module Agents.Scheduler
+module Skills.Scheduler
   ( -- Decision flows
     handleChat
   , handleChatWithContext

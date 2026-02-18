@@ -1,4 +1,4 @@
-module Agents.Insights
+module Skills.Insights
   ( -- Decision flows
     handleChat
   , handleChatWithContext

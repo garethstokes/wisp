@@ -1,9 +1,9 @@
-module Agents.SchedulerSpec (spec) where
+module Skills.SchedulerSpec (spec) where
 
 import Test.Hspec
 import Data.Aeson (decode)
 
-import Agents.Scheduler
+import Skills.Scheduler
 import Domain.Agent (agentId, agentImplemented)
 
 spec :: Spec

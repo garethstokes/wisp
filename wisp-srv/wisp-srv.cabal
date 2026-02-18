@@ -27,13 +27,13 @@ executable wisp-srv
         RecordWildCards
         StrictData
     other-modules:
-        Agents.Concierge
-        Agents.Concierge.Classifier
         Agents.Dispatcher
-        Agents.Housekeeper
-        Agents.Insights
         Agents.Run
-        Agents.Scheduler
+        Skills.Concierge
+        Skills.Concierge.Classifier
+        Skills.Housekeeper
+        Skills.Insights
+        Skills.Scheduler
         App.Config
         App.Monad
         App.Env
@@ -129,20 +129,19 @@ test-suite wisp-srv-test
         QuasiQuotes
         RecordWildCards
     other-modules:
-        Agents.Concierge
-        Agents.Concierge.Classifier
-        Agents.ConciergeSpec
-        Agents.ConciergeAgentSpec
-        Agents.Concierge.ClassifierSpec
         Agents.Dispatcher
         Agents.DispatcherSpec
-        Agents.Housekeeper
-        Agents.Insights
-        Agents.InsightsSpec
         Agents.Run
         Agents.RunSpec
-        Agents.Scheduler
-        Agents.SchedulerSpec
+        Skills.Concierge
+        Skills.Concierge.Classifier
+        Skills.Concierge.ClassifierSpec
+        Skills.ConciergeSpec
+        Skills.Housekeeper
+        Skills.Insights
+        Skills.InsightsSpec
+        Skills.Scheduler
+        Skills.SchedulerSpec
         Domain.Account
         Domain.AccountSpec
         Domain.Activity

@@ -1,4 +1,4 @@
-module Agents.Concierge.Classifier
+module Skills.Concierge.Classifier
   ( classifyActivity
   , buildClassificationPrompt
   , parseClassificationResponse

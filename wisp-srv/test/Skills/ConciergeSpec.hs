@@ -1,7 +1,7 @@
-module Agents.ConciergeAgentSpec where
+module Skills.ConciergeSpec where
 
 import Test.Hspec
-import Agents.Concierge (agentInfo)
+import Skills.Concierge (agentInfo)
 import Domain.Agent
 
 spec :: Spec

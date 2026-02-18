@@ -1,4 +1,4 @@
-module Agents.Housekeeper
+module Skills.Housekeeper
   ( agentInfo
   ) where
 
