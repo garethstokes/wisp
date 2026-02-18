@@ -4,7 +4,7 @@ module Http.Routes
 
 import Control.Monad.Reader (ReaderT)
 import Web.Scotty.Trans (ScottyT, get, post)
-import Http.Handlers.Agents (getAgents)
+import Http.Handlers.Agents (getAgents, getAgentsList, getAgentByName, postAgentChat, postAgentActivateSkill, postAgentDeactivate)
 import Http.Handlers.Auth (getGoogleAuth, getGoogleCallback, getAuthStatus)
 import Http.Handlers.Health (getHealth)
 import Http.Handlers.Activities (getActivities, getActivityStats, getActivityById, getActivityLogs, getInbox, getReview, approveActivity, dismissActivity, triggerPoll)
@@ -19,8 +19,15 @@ routes = do
   -- Health
   get "/health" getHealth
 
-  -- Agents
+  -- Agents (legacy)
   get "/agents" getAgents
+
+  -- Agents (new API)
+  get "/api/agents" getAgentsList
+  get "/api/agents/:name" getAgentByName
+  post "/api/agents/:name/chat" postAgentChat
+  post "/api/agents/:name/activate/:skill" postAgentActivateSkill
+  post "/api/agents/:name/deactivate" postAgentDeactivate
 
   -- Auth
   get "/auth/google" getGoogleAuth
