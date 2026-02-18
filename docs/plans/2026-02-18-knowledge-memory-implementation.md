@@ -871,12 +871,12 @@ git commit -m "chore: final cleanup for agents/skills architecture"
 |-------|-------|------------------|
 | 1. Foundation | 1-4 ✅ | Tags column, Note source, tag operations |
 | 2. Memory | 5-11 ✅ | Sessions, Summaries, Souls |
-| 3. Skills | 12-16 | Rename to Skills/, Skill domain, Registry, Base tools |
-| 4. Agent Core | 17-19 | Unified agent logic, dispatcher update, seed data |
-| 5. Activation | 20-21 | Skill activate/deactivate, tool dispatch |
-| 6. HTTP API | 22-24 | Agents/Skills endpoints, verification |
+| 3. Skills | 12-16 ✅ | Rename to Skills/, Skill domain, Registry, Base tools |
+| 4. Agent Core | 17-19 ✅ | Unified agent logic, dispatcher update, seed data |
+| 5. Activation | 20-21 ✅ | Skill activate/deactivate, tool dispatch |
+| 6. HTTP API | 22-24 ✅ | Agents/Skills endpoints, verification |
 
-**Total: 24 tasks (11 complete, 13 remaining)**
+**Total: 24 tasks (24 complete) ✅**
 
 After completing this plan:
 - Skills are capability modules with prompts in knowledge
