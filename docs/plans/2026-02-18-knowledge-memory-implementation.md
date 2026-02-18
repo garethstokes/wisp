@@ -4,7 +4,7 @@
 
 **Goal:** Implement shared knowledge (tagged notes) and per-agent memory (sessions, summaries, souls) for Wisp.
 
-**Architecture:** Notes are Activities with `source: Note`, classified through existing pipeline. Tags are normalized and stored in a many-to-many table. Sessions store raw conversation messages per-agent, summaries compress old sessions, souls hold personality and insights.
+**Architecture:** Notes are Activities with `source: Note` and a `tags TEXT[]` column. Sessions store raw conversation messages per-agent, summaries compress old sessions, souls hold personality and insights.
 
 **Tech Stack:** Haskell, PostgreSQL, existing App monad, Aeson for JSON
 
@@ -12,348 +12,42 @@
 
 ## Phase 1: Foundation (Tags + Notes)
 
-### Task 1: Database Migration for Tags
+### Task 1: Database Migration for Tags and Notes
 
 **Files:**
-- Create: `wisp-srv/migrations/012_tags.sql`
+- Create: `wisp-srv/migrations/012_notes.sql`
 
 **Step 1: Write the migration**
 
 ```sql
--- 012_tags.sql
--- Tags for knowledge categorization
+-- 012_notes.sql
+-- Add tags column to activities and parent_id for note supersession
 
-CREATE TABLE tags (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name TEXT UNIQUE NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE activity_tags (
-  activity_id UUID REFERENCES activities(id) ON DELETE CASCADE,
-  tag_id UUID REFERENCES tags(id) ON DELETE CASCADE,
-  PRIMARY KEY (activity_id, tag_id)
-);
-
-CREATE INDEX idx_activity_tags_activity ON activity_tags(activity_id);
-CREATE INDEX idx_activity_tags_tag ON activity_tags(tag_id);
-
--- Add parent_id for note supersession
+ALTER TABLE activities ADD COLUMN tags TEXT[] DEFAULT '{}';
 ALTER TABLE activities ADD COLUMN parent_id UUID REFERENCES activities(id);
+
+CREATE INDEX idx_activities_tags ON activities USING GIN (tags);
+CREATE INDEX idx_activities_source_note ON activities(source) WHERE source = 'note';
 ```
 
 **Step 2: Verify migration file exists**
 
-Run: `ls -la wisp-srv/migrations/012_tags.sql`
+Run: `ls -la wisp-srv/migrations/012_notes.sql`
 Expected: File exists
 
 **Step 3: Commit**
 
 ```bash
-git add wisp-srv/migrations/012_tags.sql
-git commit -m "feat(db): add tags and activity_tags tables"
+git add wisp-srv/migrations/012_notes.sql
+git commit -m "feat(db): add tags column and parent_id to activities"
 ```
 
 ---
 
-### Task 2: Tag Domain Model
-
-**Files:**
-- Create: `wisp-srv/src/Domain/Tag.hs`
-- Modify: `wisp-srv/wisp-srv.cabal` (add Domain.Tag to other-modules)
-
-**Step 1: Write the failing test**
-
-Create: `wisp-srv/test/Domain/TagSpec.hs`
-
-```haskell
-module Domain.TagSpec (spec) where
-
-import Test.Hspec
-import Data.Aeson (encode, decode)
-import Domain.Tag
-
-spec :: Spec
-spec = describe "Tag" $ do
-  describe "JSON serialization" $ do
-    it "serializes Tag to JSON" $ do
-      let tag = Tag (TagId "abc123") "superit"
-      encode tag `shouldContain` "\"name\":\"superit\""
-
-    it "normalizes tag names to lowercase" $ do
-      normalizeTagName "SuperIT" `shouldBe` "superit"
-      normalizeTagName "ALICE" `shouldBe` "alice"
-      normalizeTagName "my-project" `shouldBe` "my-project"
-```
-
-**Step 2: Run test to verify it fails**
-
-Run: `cd wisp-srv && cabal test --test-option=--match="Tag"`
-Expected: FAIL - module Domain.Tag not found
-
-**Step 3: Write Domain/Tag.hs**
-
-```haskell
-module Domain.Tag
-  ( Tag(..)
-  , TagId(..)
-  , NewTag(..)
-  , normalizeTagName
-  ) where
-
-import Data.Aeson (ToJSON(..), FromJSON(..), object, (.=), withObject, (.:))
-import Data.Text (Text)
-import qualified Data.Text as T
-import Data.Time (UTCTime)
-import GHC.Generics (Generic)
-
-newtype TagId = TagId { unTagId :: Text }
-  deriving (Eq, Show, Generic)
-  deriving newtype (ToJSON, FromJSON)
-
-data Tag = Tag
-  { tagId :: TagId
-  , tagName :: Text
-  } deriving (Eq, Show)
-
-instance ToJSON Tag where
-  toJSON t = object
-    [ "id" .= tagId t
-    , "name" .= tagName t
-    ]
-
-instance FromJSON Tag where
-  parseJSON = withObject "Tag" $ \v -> Tag
-    <$> v .: "id"
-    <*> v .: "name"
-
-data NewTag = NewTag
-  { newTagName :: Text
-  } deriving (Eq, Show)
-
--- Normalize tag names: lowercase, trimmed
-normalizeTagName :: Text -> Text
-normalizeTagName = T.toLower . T.strip
-```
-
-**Step 4: Add to cabal file**
-
-Add `Domain.Tag` and `Domain.TagSpec` to the appropriate other-modules sections in `wisp-srv.cabal`.
-
-**Step 5: Run test to verify it passes**
-
-Run: `cd wisp-srv && cabal test --test-option=--match="Tag"`
-Expected: PASS
-
-**Step 6: Commit**
-
-```bash
-git add wisp-srv/src/Domain/Tag.hs wisp-srv/test/Domain/TagSpec.hs wisp-srv/wisp-srv.cabal
-git commit -m "feat(domain): add Tag model with normalization"
-```
-
----
-
-### Task 3: Tag Database Layer
-
-**Files:**
-- Create: `wisp-srv/src/Infra/Db/Tag.hs`
-- Create: `wisp-srv/test/Infra/Db/TagSpec.hs`
-- Modify: `wisp-srv/wisp-srv.cabal`
-
-**Step 1: Write the failing test**
-
-```haskell
-module Infra.Db.TagSpec (spec) where
-
-import Test.Hspec
-import Domain.Tag (Tag(..), TagId(..), normalizeTagName)
-import Infra.Db.Tag
-import TestEnv (withTestEnv, runTestApp)
-
-spec :: Spec
-spec = describe "Infra.Db.Tag" $ around withTestEnv $ do
-  describe "insertTag" $ do
-    it "creates a new tag with normalized name" $ \env -> runTestApp env $ do
-      mTag <- insertTag "SuperIT"
-      case mTag of
-        Just tag -> do
-          liftIO $ tagName tag `shouldBe` "superit"
-        Nothing -> liftIO $ expectationFailure "Expected tag to be created"
-
-  describe "getOrCreateTag" $ do
-    it "returns existing tag if name exists" $ \env -> runTestApp env $ do
-      tag1 <- getOrCreateTag "alice"
-      tag2 <- getOrCreateTag "ALICE"  -- different case
-      liftIO $ tagId tag1 `shouldBe` tagId tag2
-
-  describe "getTagsByActivity" $ do
-    it "returns empty list for activity with no tags" $ \env -> runTestApp env $ do
-      tags <- getTagsByActivity (EntityId "nonexistent")
-      liftIO $ tags `shouldBe` []
-```
-
-**Step 2: Run test to verify it fails**
-
-Run: `cd wisp-srv && cabal test --test-option=--match="Infra.Db.Tag"`
-Expected: FAIL - module not found
-
-**Step 3: Write Infra/Db/Tag.hs**
-
-```haskell
-module Infra.Db.Tag
-  ( insertTag
-  , getOrCreateTag
-  , getTagByName
-  , getAllTags
-  , getTagsByActivity
-  , addTagToActivity
-  , removeTagFromActivity
-  , setActivityTags
-  , searchTags
-  ) where
-
-import Control.Monad.IO.Class (liftIO)
-import Data.Text (Text)
-import Database.PostgreSQL.Simple
-import Database.PostgreSQL.Simple.FromRow
-import Domain.Id (EntityId(..), newEntityId)
-import Domain.Tag
-import App.Monad (App, getConn)
-
-instance FromRow Tag where
-  fromRow = Tag <$> (TagId <$> field) <*> field
-
--- Insert a new tag (returns Nothing if already exists)
-insertTag :: Text -> App (Maybe Tag)
-insertTag name = do
-  conn <- getConn
-  let normalized = normalizeTagName name
-  tagId <- liftIO $ unEntityId <$> newEntityId
-  results <- liftIO $ query conn
-    "INSERT INTO tags (id, name) VALUES (?, ?) \
-    \ON CONFLICT (name) DO NOTHING \
-    \RETURNING id, name"
-    (tagId, normalized)
-  pure $ case results of
-    [tag] -> Just tag
-    _ -> Nothing
-
--- Get or create a tag by name
-getOrCreateTag :: Text -> App Tag
-getOrCreateTag name = do
-  conn <- getConn
-  let normalized = normalizeTagName name
-  -- Try to get existing
-  existing <- getTagByName normalized
-  case existing of
-    Just tag -> pure tag
-    Nothing -> do
-      -- Create new
-      tagId <- liftIO $ unEntityId <$> newEntityId
-      _ <- liftIO $ execute conn
-        "INSERT INTO tags (id, name) VALUES (?, ?) ON CONFLICT DO NOTHING"
-        (tagId, normalized)
-      -- Fetch it (handles race condition)
-      result <- getTagByName normalized
-      case result of
-        Just tag -> pure tag
-        Nothing -> error "Failed to create tag"  -- Should never happen
-
--- Get tag by name
-getTagByName :: Text -> App (Maybe Tag)
-getTagByName name = do
-  conn <- getConn
-  let normalized = normalizeTagName name
-  results <- liftIO $ query conn
-    "SELECT id, name FROM tags WHERE name = ?"
-    (Only normalized)
-  pure $ case results of
-    [tag] -> Just tag
-    _ -> Nothing
-
--- Get all tags (for suggestion)
-getAllTags :: App [Tag]
-getAllTags = do
-  conn <- getConn
-  liftIO $ query_ conn "SELECT id, name FROM tags ORDER BY name"
-
--- Get tags for an activity
-getTagsByActivity :: EntityId -> App [Tag]
-getTagsByActivity activityId = do
-  conn <- getConn
-  liftIO $ query conn
-    "SELECT t.id, t.name FROM tags t \
-    \JOIN activity_tags at ON t.id = at.tag_id \
-    \WHERE at.activity_id = ? \
-    \ORDER BY t.name"
-    (Only $ unEntityId activityId)
-
--- Add a tag to an activity
-addTagToActivity :: EntityId -> TagId -> App ()
-addTagToActivity activityId tagId = do
-  conn <- getConn
-  _ <- liftIO $ execute conn
-    "INSERT INTO activity_tags (activity_id, tag_id) VALUES (?, ?) \
-    \ON CONFLICT DO NOTHING"
-    (unEntityId activityId, unTagId tagId)
-  pure ()
-
--- Remove a tag from an activity
-removeTagFromActivity :: EntityId -> TagId -> App ()
-removeTagFromActivity activityId tagId = do
-  conn <- getConn
-  _ <- liftIO $ execute conn
-    "DELETE FROM activity_tags WHERE activity_id = ? AND tag_id = ?"
-    (unEntityId activityId, unTagId tagId)
-  pure ()
-
--- Set all tags for an activity (replaces existing)
-setActivityTags :: EntityId -> [Text] -> App [Tag]
-setActivityTags activityId tagNames = do
-  conn <- getConn
-  -- Remove existing tags
-  _ <- liftIO $ execute conn
-    "DELETE FROM activity_tags WHERE activity_id = ?"
-    (Only $ unEntityId activityId)
-  -- Add new tags
-  tags <- mapM getOrCreateTag tagNames
-  mapM_ (\t -> addTagToActivity activityId (tagId t)) tags
-  pure tags
-
--- Search tags by prefix (for autocomplete)
-searchTags :: Text -> Int -> App [Tag]
-searchTags prefix limit = do
-  conn <- getConn
-  let pattern = normalizeTagName prefix <> "%"
-  liftIO $ query conn
-    "SELECT id, name FROM tags WHERE name LIKE ? ORDER BY name LIMIT ?"
-    (pattern, limit)
-```
-
-**Step 4: Add to cabal file**
-
-Add `Infra.Db.Tag` and `Infra.Db.TagSpec` to `wisp-srv.cabal`.
-
-**Step 5: Run test to verify it passes**
-
-Run: `cd wisp-srv && cabal test --test-option=--match="Infra.Db.Tag"`
-Expected: PASS
-
-**Step 6: Commit**
-
-```bash
-git add wisp-srv/src/Infra/Db/Tag.hs wisp-srv/test/Infra/Db/TagSpec.hs wisp-srv/wisp-srv.cabal
-git commit -m "feat(db): add Tag database operations"
-```
-
----
-
-### Task 4: Add Note Source to Activity
+### Task 2: Update Activity Domain Model with Tags
 
 **Files:**
 - Modify: `wisp-srv/src/Domain/Activity.hs`
-- Modify: `wisp-srv/src/Infra/Db/Activity.hs`
 - Modify: `wisp-srv/test/Domain/ActivitySpec.hs`
 
 **Step 1: Write the failing test**
@@ -367,6 +61,11 @@ Add to `Domain/ActivitySpec.hs`:
 
     it "parses note from JSON" $ do
       decode "\"note\"" `shouldBe` Just Note
+
+  describe "Activity tags" $ do
+    it "normalizes tag names to lowercase" $ do
+      normalizeTag "SuperIT" `shouldBe` "superit"
+      normalizeTag "ALICE" `shouldBe` "alice"
 ```
 
 **Step 2: Run test to verify it fails**
@@ -374,11 +73,19 @@ Add to `Domain/ActivitySpec.hs`:
 Run: `cd wisp-srv && cabal test --test-option=--match="ActivitySource"`
 Expected: FAIL - Note not in scope
 
-**Step 3: Add Note to ActivitySource**
-
-In `Domain/Activity.hs`, update:
+**Step 3: Update Domain/Activity.hs**
 
 ```haskell
+module Domain.Activity
+  ( Activity(..)
+  , ActivitySource(..)
+  , ActivityStatus(..)
+  , NewActivity(..)
+  , normalizeTag
+  , normalizeTags
+  ) where
+
+-- Add to ActivitySource:
 data ActivitySource = Email | Calendar | Conversation | Note
   deriving (Eq, Show, Generic)
 
@@ -395,42 +102,144 @@ instance FromJSON ActivitySource where
     "conversation" -> pure Conversation
     "note" -> pure Note
     _ -> fail "Invalid activity source"
+
+-- Add to Activity record:
+data Activity = Activity
+  { activityId :: EntityId
+  , activityAccountId :: EntityId
+  , activitySource :: ActivitySource
+  , activitySourceId :: Text
+  , activityRaw :: Value
+  , activityStatus :: ActivityStatus
+  , activityTitle :: Maybe Text
+  , activitySummary :: Maybe Text
+  , activitySenderEmail :: Maybe Text
+  , activityStartsAt :: Maybe UTCTime
+  , activityEndsAt :: Maybe UTCTime
+  , activityCreatedAt :: UTCTime
+  , activityPersonas :: Maybe [Text]
+  , activityType :: Maybe Text
+  , activityUrgency :: Maybe Text
+  , activityAutonomyTier :: Maybe Int
+  , activityConfidence :: Maybe Double
+  , activityPersonId :: Maybe EntityId
+  , activityTags :: [Text]           -- NEW
+  , activityParentId :: Maybe EntityId -- NEW
+  } deriving (Show)
+
+-- Tag normalization
+normalizeTag :: Text -> Text
+normalizeTag = T.toLower . T.strip
+
+normalizeTags :: [Text] -> [Text]
+normalizeTags = map normalizeTag
 ```
 
-**Step 4: Update Infra/Db/Activity.hs**
-
-Update `parseSource` and `srcText` mappings to include "note" -> Note.
-
-**Step 5: Run test to verify it passes**
+**Step 4: Run test to verify it passes**
 
 Run: `cd wisp-srv && cabal test --test-option=--match="ActivitySource"`
 Expected: PASS
 
-**Step 6: Commit**
+**Step 5: Commit**
 
 ```bash
-git add wisp-srv/src/Domain/Activity.hs wisp-srv/src/Infra/Db/Activity.hs wisp-srv/test/Domain/ActivitySpec.hs
-git commit -m "feat(domain): add Note as ActivitySource"
+git add wisp-srv/src/Domain/Activity.hs wisp-srv/test/Domain/ActivitySpec.hs
+git commit -m "feat(domain): add Note source, tags, and parent_id to Activity"
 ```
 
 ---
 
-### Task 5: Note Insertion Function
+### Task 3: Update Activity Database Layer
 
 **Files:**
 - Modify: `wisp-srv/src/Infra/Db/Activity.hs`
 - Modify: `wisp-srv/test/Infra/Db/ActivitySpec.hs`
 
-**Step 1: Write the failing test**
+**Step 1: Update DbActivity FromRow instance**
 
-Add to `Infra/Db/ActivitySpec.hs`:
+Add tags and parent_id fields to the SELECT queries and FromRow instance:
+
+```haskell
+instance FromRow DbActivity where
+  fromRow = fmap DbActivity $ Activity
+    <$> (EntityId <$> field)          -- id
+    <*> (EntityId <$> field)          -- account_id
+    <*> (parseSource <$> field)       -- source
+    <*> field                          -- source_id
+    <*> field                          -- raw (jsonb)
+    <*> (parseStatus <$> field)       -- status
+    <*> field                          -- title
+    <*> field                          -- summary
+    <*> field                          -- sender_email
+    <*> field                          -- starts_at
+    <*> field                          -- ends_at
+    <*> field                          -- created_at
+    <*> (fmap fromPGArray <$> field)  -- personas
+    <*> field                          -- activity_type
+    <*> field                          -- urgency
+    <*> field                          -- autonomy_tier
+    <*> field                          -- confidence
+    <*> (fmap EntityId <$> field)     -- person_id
+    <*> (fromPGArray <$> field)       -- tags (NEW)
+    <*> (fmap EntityId <$> field)     -- parent_id (NEW)
+    where
+      parseSource :: Text -> ActivitySource
+      parseSource "email" = Email
+      parseSource "calendar" = Calendar
+      parseSource "conversation" = Conversation
+      parseSource "note" = Note
+      parseSource _ = Email
+
+      parseStatus :: Text -> ActivityStatus
+      -- ... existing code
+```
+
+**Step 2: Update all SELECT queries**
+
+Add `tags, parent_id` to all activity SELECT statements. Example:
+
+```haskell
+getActivity :: EntityId -> App (Maybe Activity)
+getActivity aid = do
+  conn <- getConn
+  results <- liftIO $ query conn
+    "select id, account_id, source, source_id, raw, status, title, summary, \
+    \sender_email, starts_at, ends_at, created_at, \
+    \personas, activity_type, urgency, autonomy_tier, confidence, person_id, \
+    \tags, parent_id \
+    \from activities where id = ?"
+    (Only $ unEntityId aid)
+  -- ... rest unchanged
+```
+
+**Step 3: Run tests**
+
+Run: `cd wisp-srv && cabal test`
+Expected: PASS (update tests if needed)
+
+**Step 4: Commit**
+
+```bash
+git add wisp-srv/src/Infra/Db/Activity.hs wisp-srv/test/Infra/Db/ActivitySpec.hs
+git commit -m "feat(db): add tags and parent_id to Activity queries"
+```
+
+---
+
+### Task 4: Note Insertion and Tag Operations
+
+**Files:**
+- Modify: `wisp-srv/src/Infra/Db/Activity.hs`
+- Add test to: `wisp-srv/test/Infra/Db/ActivitySpec.hs`
+
+**Step 1: Write the failing test**
 
 ```haskell
   describe "insertNote" $ do
     it "creates a note activity with tags" $ \env -> runTestApp env $ do
-      -- Need an account first
       let accountId = EntityId "test-account"
-      mActivityId <- insertNote accountId "Alice works at Google" ["alice", "work"] noteOrigin
+      let rawMeta = object ["origin" .= ("test" :: Text)]
+      mActivityId <- insertNote accountId "Alice works at Google" ["Alice", "Work"] rawMeta
       case mActivityId of
         Just aid -> do
           mActivity <- getActivity aid
@@ -438,48 +247,113 @@ Add to `Infra/Db/ActivitySpec.hs`:
             Just activity -> do
               liftIO $ activitySource activity `shouldBe` Note
               liftIO $ activityTitle activity `shouldBe` Just "Alice works at Google"
+              liftIO $ activityTags activity `shouldBe` ["alice", "work"]  -- normalized
             Nothing -> liftIO $ expectationFailure "Activity not found"
         Nothing -> liftIO $ expectationFailure "Note not created"
-      where
-        noteOrigin = object ["origin" .= ("test" :: Text)]
+
+  describe "getActivitiesByTags" $ do
+    it "returns notes matching any of the given tags" $ \env -> runTestApp env $ do
+      let accountId = EntityId "test-account"
+      let rawMeta = object []
+      _ <- insertNote accountId "Alice info" ["alice", "family"] rawMeta
+      _ <- insertNote accountId "SuperIT info" ["superit", "work"] rawMeta
+      _ <- insertNote accountId "Alice at SuperIT" ["alice", "superit"] rawMeta
+
+      aliceNotes <- getActivitiesByTags ["alice"] 10
+      liftIO $ length aliceNotes `shouldBe` 2
+
+  describe "getAllTags" $ do
+    it "returns unique tags across all notes" $ \env -> runTestApp env $ do
+      let accountId = EntityId "test-account"
+      let rawMeta = object []
+      _ <- insertNote accountId "Note 1" ["alice", "work"] rawMeta
+      _ <- insertNote accountId "Note 2" ["bob", "work"] rawMeta
+
+      tags <- getAllTags
+      liftIO $ tags `shouldContain` ["alice"]
+      liftIO $ tags `shouldContain` ["bob"]
+      liftIO $ tags `shouldContain` ["work"]
 ```
 
 **Step 2: Run test to verify it fails**
 
 Run: `cd wisp-srv && cabal test --test-option=--match="insertNote"`
-Expected: FAIL - insertNote not in scope
+Expected: FAIL
 
-**Step 3: Add insertNote function**
-
-In `Infra/Db/Activity.hs`, add:
+**Step 3: Add functions to Infra/Db/Activity.hs**
 
 ```haskell
-import Data.Aeson (Value, object, (.=))
-import Infra.Db.Tag (setActivityTags)
+import Domain.Activity (normalizeTag, normalizeTags)
 
 -- Insert a note (returns activity ID)
 insertNote :: EntityId -> Text -> [Text] -> Value -> App (Maybe EntityId)
 insertNote accountId content tagNames rawMeta = do
   conn <- getConn
   aid <- liftIO newEntityId
+  let normalizedTags = normalizeTags tagNames
   n <- liftIO $ execute conn
     "INSERT INTO activities \
-    \(id, account_id, source, source_id, raw, title, status) \
-    \VALUES (?, ?, 'note', ?, ?, ?, 'pending')"
+    \(id, account_id, source, source_id, raw, title, status, tags) \
+    \VALUES (?, ?, 'note', ?, ?, ?, 'pending', ?)"
     ( unEntityId aid
     , unEntityId accountId
     , "note-" <> unEntityId aid
     , rawMeta
     , content
+    , PGArray normalizedTags
     )
-  if n > 0
-    then do
-      _ <- setActivityTags aid tagNames
-      pure $ Just aid
-    else pure Nothing
+  pure $ if n > 0 then Just aid else Nothing
+
+-- Get activities (notes) by tags - matches ANY of the given tags
+getActivitiesByTags :: [Text] -> Int -> App [Activity]
+getActivitiesByTags tagNames limit = do
+  conn <- getConn
+  let normalizedTags = normalizeTags tagNames
+  results <- liftIO $ query conn
+    "SELECT id, account_id, source, source_id, raw, status, title, summary, \
+    \sender_email, starts_at, ends_at, created_at, \
+    \personas, activity_type, urgency, autonomy_tier, confidence, person_id, \
+    \tags, parent_id \
+    \FROM activities \
+    \WHERE source = 'note' AND tags && ? \
+    \ORDER BY created_at DESC \
+    \LIMIT ?"
+    (PGArray normalizedTags, limit)
+  pure $ map unDbActivity results
+
+-- Get all unique tags (for autocomplete/suggestion)
+getAllTags :: App [Text]
+getAllTags = do
+  conn <- getConn
+  results <- liftIO $ query_ conn
+    "SELECT DISTINCT unnest(tags) AS tag FROM activities WHERE tags != '{}' ORDER BY tag"
+  pure $ map fromOnly results
+
+-- Search tags by prefix (for autocomplete)
+searchTags :: Text -> Int -> App [Text]
+searchTags prefix limit = do
+  conn <- getConn
+  let pattern = normalizeTag prefix <> "%"
+  results <- liftIO $ query conn
+    "SELECT DISTINCT unnest(tags) AS tag FROM activities \
+    \WHERE tags != '{}' \
+    \ORDER BY tag \
+    \LIMIT ?"
+    (Only limit)
+  pure $ filter (T.isPrefixOf (normalizeTag prefix)) $ map fromOnly results
+
+-- Update tags for an activity
+updateActivityTags :: EntityId -> [Text] -> App ()
+updateActivityTags aid tagNames = do
+  conn <- getConn
+  let normalizedTags = normalizeTags tagNames
+  _ <- liftIO $ execute conn
+    "UPDATE activities SET tags = ?, updated_at = now() WHERE id = ?"
+    (PGArray normalizedTags, unEntityId aid)
+  pure ()
 ```
 
-Also export `insertNote` from the module.
+Also export: `insertNote`, `getActivitiesByTags`, `getAllTags`, `searchTags`, `updateActivityTags`
 
 **Step 4: Run test to verify it passes**
 
@@ -490,14 +364,14 @@ Expected: PASS
 
 ```bash
 git add wisp-srv/src/Infra/Db/Activity.hs wisp-srv/test/Infra/Db/ActivitySpec.hs
-git commit -m "feat(db): add insertNote for creating note activities"
+git commit -m "feat(db): add insertNote and tag query functions"
 ```
 
 ---
 
 ## Phase 2: Memory (Sessions, Summaries, Souls)
 
-### Task 6: Database Migration for Memory Tables
+### Task 5: Database Migration for Memory Tables
 
 **Files:**
 - Create: `wisp-srv/migrations/013_memory.sql`
@@ -552,7 +426,7 @@ git commit -m "feat(db): add sessions, summaries, souls tables"
 
 ---
 
-### Task 7: Session Domain Model
+### Task 6: Session Domain Model
 
 **Files:**
 - Create: `wisp-srv/src/Domain/Session.hs`
@@ -643,6 +517,8 @@ data NewSession = NewSession
 
 **Step 4: Add to cabal and run tests**
 
+Add `Domain.Session` and `Domain.SessionSpec` to `wisp-srv.cabal`.
+
 Run: `cd wisp-srv && cabal test --test-option=--match="Session"`
 Expected: PASS
 
@@ -655,7 +531,7 @@ git commit -m "feat(domain): add Session model"
 
 ---
 
-### Task 8: Summary Domain Model
+### Task 7: Summary Domain Model
 
 **Files:**
 - Create: `wisp-srv/src/Domain/Summary.hs`
@@ -748,7 +624,7 @@ git commit -m "feat(domain): add Summary model"
 
 ---
 
-### Task 9: Soul Domain Model
+### Task 8: Soul Domain Model
 
 **Files:**
 - Create: `wisp-srv/src/Domain/Soul.hs`
@@ -797,7 +673,7 @@ module Domain.Soul
 
 import Data.Aeson (ToJSON(..), FromJSON(..), object, (.=), withObject, (.:))
 import Data.Text (Text)
-import Data.Time (UTCTime, getCurrentTime)
+import Data.Time (UTCTime)
 import GHC.Generics (Generic)
 
 data Soul = Soul
@@ -828,7 +704,7 @@ emptySoul agentId = Soul
   { soulAgentId = agentId
   , soulPersonality = ""
   , soulInsights = []
-  , soulUpdatedAt = read "1970-01-01 00:00:00 UTC"  -- Will be set properly on insert
+  , soulUpdatedAt = read "1970-01-01 00:00:00 UTC"
   }
 ```
 
@@ -846,7 +722,7 @@ git commit -m "feat(domain): add Soul model"
 
 ---
 
-### Task 10: Session Database Layer
+### Task 9: Session Database Layer
 
 **Files:**
 - Create: `wisp-srv/src/Infra/Db/Session.hs`
@@ -859,6 +735,8 @@ git commit -m "feat(domain): add Soul model"
 module Infra.Db.SessionSpec (spec) where
 
 import Test.Hspec
+import Data.Maybe (isJust)
+import Control.Monad.IO.Class (liftIO)
 import Domain.Session (Session(..), SessionId(..))
 import Domain.Chat (ChatMessage(..))
 import Infra.Db.Session
@@ -917,12 +795,10 @@ module Infra.Db.Session
 
 import Control.Monad.IO.Class (liftIO)
 import Data.Aeson (encode, decode, Value)
-import qualified Data.ByteString.Lazy as LBS
 import Data.Text (Text)
 import Data.Time (UTCTime, getCurrentTime)
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.FromRow
-import Database.PostgreSQL.Simple.Types (PGArray(..))
 import Domain.Id (newEntityId, unEntityId)
 import Domain.Session
 import Domain.Chat (ChatMessage)
@@ -942,7 +818,6 @@ instance FromRow Session where
         Just msgs -> msgs
         Nothing -> []
 
--- Create a new session
 createSession :: Text -> App Session
 createSession agentId = do
   conn <- getConn
@@ -960,7 +835,6 @@ createSession agentId = do
     , sessionSummarized = False
     }
 
--- Get session by ID
 getSession :: SessionId -> App (Maybe Session)
 getSession sid = do
   conn <- getConn
@@ -972,7 +846,6 @@ getSession sid = do
     [s] -> Just s
     _ -> Nothing
 
--- Get active (not ended) session for agent
 getActiveSession :: Text -> App (Maybe Session)
 getActiveSession agentId = do
   conn <- getConn
@@ -985,7 +858,6 @@ getActiveSession agentId = do
     [s] -> Just s
     _ -> Nothing
 
--- Get recent sessions for agent
 getRecentSessions :: Text -> Int -> App [Session]
 getRecentSessions agentId limit = do
   conn <- getConn
@@ -995,7 +867,6 @@ getRecentSessions agentId limit = do
     \ORDER BY created_at DESC LIMIT ?"
     (agentId, limit)
 
--- Append a message to session
 appendMessage :: SessionId -> ChatMessage -> App Session
 appendMessage sid msg = do
   conn <- getConn
@@ -1007,7 +878,6 @@ appendMessage sid msg = do
     Just s -> pure s
     Nothing -> error "Session not found after append"
 
--- End a session
 endSession :: SessionId -> App ()
 endSession sid = do
   conn <- getConn
@@ -1017,7 +887,6 @@ endSession sid = do
     (now, unSessionId sid)
   pure ()
 
--- Mark session as summarized
 markSummarized :: SessionId -> App ()
 markSummarized sid = do
   conn <- getConn
@@ -1026,7 +895,6 @@ markSummarized sid = do
     (Only $ unSessionId sid)
   pure ()
 
--- Get sessions that need summarization
 getUnsummarizedSessions :: Text -> App [Session]
 getUnsummarizedSessions agentId = do
   conn <- getConn
@@ -1052,7 +920,7 @@ git commit -m "feat(db): add Session database operations"
 
 ---
 
-### Task 11: Soul Database Layer
+### Task 10: Soul Database Layer
 
 **Files:**
 - Create: `wisp-srv/src/Infra/Db/Soul.hs`
@@ -1065,6 +933,7 @@ git commit -m "feat(db): add Session database operations"
 module Infra.Db.SoulSpec (spec) where
 
 import Test.Hspec
+import Control.Monad.IO.Class (liftIO)
 import Domain.Soul (Soul(..))
 import Infra.Db.Soul
 import TestEnv (withTestEnv, runTestApp)
@@ -1130,7 +999,6 @@ instance FromRow Soul where
         Just insights -> insights
         Nothing -> []
 
--- Get soul for agent
 getSoul :: Text -> App (Maybe Soul)
 getSoul agentId = do
   conn <- getConn
@@ -1141,7 +1009,6 @@ getSoul agentId = do
     [s] -> Just s
     _ -> Nothing
 
--- Get or create soul for agent
 getOrCreateSoul :: Text -> App Soul
 getOrCreateSoul agentId = do
   existing <- getSoul agentId
@@ -1159,7 +1026,6 @@ getOrCreateSoul agentId = do
         Just soul -> pure soul
         Nothing -> pure $ emptySoul agentId
 
--- Update soul personality
 updateSoulPersonality :: Text -> Text -> App ()
 updateSoulPersonality agentId personality = do
   conn <- getConn
@@ -1169,7 +1035,6 @@ updateSoulPersonality agentId personality = do
     (personality, now, agentId)
   pure ()
 
--- Add an insight
 addInsight :: Text -> Text -> App ()
 addInsight agentId insight = do
   conn <- getConn
@@ -1179,21 +1044,18 @@ addInsight agentId insight = do
     (encode [insight], now, agentId)
   pure ()
 
--- Remove an insight
 removeInsight :: Text -> Text -> App ()
 removeInsight agentId insight = do
   conn <- getConn
   now <- liftIO getCurrentTime
-  -- Remove by filtering the array
   _ <- liftIO $ execute conn
     "UPDATE souls SET \
-    \  insights = (SELECT jsonb_agg(elem) FROM jsonb_array_elements(insights) elem WHERE elem::text != ?::text), \
+    \  insights = (SELECT COALESCE(jsonb_agg(elem), '[]'::jsonb) FROM jsonb_array_elements(insights) elem WHERE elem != ?::jsonb), \
     \  updated_at = ? \
     \WHERE agent_id = ?"
     (encode insight, now, agentId)
   pure ()
 
--- Full soul update
 updateSoul :: Soul -> App ()
 updateSoul soul = do
   conn <- getConn
@@ -1223,7 +1085,7 @@ git commit -m "feat(db): add Soul database operations"
 
 ---
 
-### Task 12: Summary Database Layer
+### Task 11: Summary Database Layer
 
 **Files:**
 - Create: `wisp-srv/src/Infra/Db/Summary.hs`
@@ -1236,10 +1098,11 @@ git commit -m "feat(db): add Soul database operations"
 module Infra.Db.SummarySpec (spec) where
 
 import Test.Hspec
+import Control.Monad.IO.Class (liftIO)
 import Domain.Summary (Summary(..), SummaryId(..))
-import Domain.Session (SessionId(..))
+import Domain.Session (SessionId(..), Session(..))
 import Infra.Db.Summary
-import Infra.Db.Session (createSession, endSession)
+import Infra.Db.Session (createSession, endSession, sessionId)
 import TestEnv (withTestEnv, runTestApp)
 
 spec :: Spec
@@ -1295,7 +1158,6 @@ instance FromRow Summary where
     <*> field
     <*> field
 
--- Insert a summary
 insertSummary :: Text -> [SessionId] -> Text -> App Summary
 insertSummary agentId sessionIds content = do
   conn <- getConn
@@ -1313,7 +1175,6 @@ insertSummary agentId sessionIds content = do
     , summaryCreatedAt = now
     }
 
--- Get summary by ID
 getSummary :: SummaryId -> App (Maybe Summary)
 getSummary sid = do
   conn <- getConn
@@ -1325,7 +1186,6 @@ getSummary sid = do
     [s] -> Just s
     _ -> Nothing
 
--- Get recent summaries for agent
 getRecentSummaries :: Text -> Int -> App [Summary]
 getRecentSummaries agentId limit = do
   conn <- getConn
@@ -1335,7 +1195,6 @@ getRecentSummaries agentId limit = do
     \ORDER BY created_at DESC LIMIT ?"
     (agentId, limit)
 
--- Get summaries that cover specific sessions
 getSummariesForSessions :: [SessionId] -> App [Summary]
 getSummariesForSessions sessionIds = do
   conn <- getConn
@@ -1362,15 +1221,13 @@ git commit -m "feat(db): add Summary database operations"
 
 ## Phase 3: Integration
 
-### Task 13: Update ChatContext to Include Soul
+### Task 12: Update ChatContext to Include Soul and Notes
 
 **Files:**
 - Modify: `wisp-srv/src/Domain/Chat.hs`
 - Modify: `wisp-srv/test/Domain/ChatSpec.hs`
 
 **Step 1: Update ChatContext**
-
-Add soul and summaries to ChatContext:
 
 ```haskell
 import Domain.Soul (Soul)
@@ -1386,18 +1243,16 @@ data ChatContext = ChatContext
   , contextMentionedPeople :: [Person]
   , contextSoul :: Maybe Soul           -- NEW
   , contextSummaries :: [Summary]       -- NEW
-  , contextRelevantNotes :: [Activity]  -- NEW: tag-matched knowledge
+  , contextRelevantNotes :: [Activity]  -- NEW
   } deriving (Show)
 ```
 
-**Step 2: Update agents to use soul**
-
-This will be done in subsequent tasks when updating agent context assembly.
+**Step 2: Update any tests that construct ChatContext**
 
 **Step 3: Run tests**
 
 Run: `cd wisp-srv && cabal test`
-Expected: PASS (may need to update tests that construct ChatContext)
+Expected: PASS
 
 **Step 4: Commit**
 
@@ -1408,80 +1263,13 @@ git commit -m "feat(domain): add soul, summaries, and notes to ChatContext"
 
 ---
 
-### Task 14: Knowledge Retrieval by Tags
-
-**Files:**
-- Modify: `wisp-srv/src/Infra/Db/Activity.hs`
-- Add test to: `wisp-srv/test/Infra/Db/ActivitySpec.hs`
-
-**Step 1: Write the failing test**
-
-```haskell
-  describe "getActivitiesByTags" $ do
-    it "returns notes matching any of the given tags" $ \env -> runTestApp env $ do
-      let accountId = EntityId "test-account"
-      -- Create notes with different tags
-      _ <- insertNote accountId "Alice info" ["alice", "family"] (object [])
-      _ <- insertNote accountId "SuperIT info" ["superit", "work"] (object [])
-      _ <- insertNote accountId "Alice at SuperIT" ["alice", "superit"] (object [])
-
-      -- Query by alice tag
-      aliceNotes <- getActivitiesByTags ["alice"] 10
-      liftIO $ length aliceNotes `shouldBe` 2
-
-      -- Query by superit tag
-      superitNotes <- getActivitiesByTags ["superit"] 10
-      liftIO $ length superitNotes `shouldBe` 2
-```
-
-**Step 2: Run test to verify it fails**
-
-Run: `cd wisp-srv && cabal test --test-option=--match="getActivitiesByTags"`
-Expected: FAIL
-
-**Step 3: Add getActivitiesByTags function**
-
-```haskell
--- Get activities (notes) by tags
-getActivitiesByTags :: [Text] -> Int -> App [Activity]
-getActivitiesByTags tagNames limit = do
-  conn <- getConn
-  let normalizedTags = map normalizeTagName tagNames
-  results <- liftIO $ query conn
-    "SELECT DISTINCT a.id, a.account_id, a.source, a.source_id, a.raw, a.status, \
-    \a.title, a.summary, a.sender_email, a.starts_at, a.ends_at, a.created_at, \
-    \a.personas, a.activity_type, a.urgency, a.autonomy_tier, a.confidence, a.person_id \
-    \FROM activities a \
-    \JOIN activity_tags at ON a.id = at.activity_id \
-    \JOIN tags t ON at.tag_id = t.id \
-    \WHERE t.name = ANY(?) AND a.source = 'note' \
-    \ORDER BY a.created_at DESC \
-    \LIMIT ?"
-    (PGArray normalizedTags, limit)
-  pure $ map unDbActivity results
-```
-
-**Step 4: Run test to verify it passes**
-
-Run: `cd wisp-srv && cabal test --test-option=--match="getActivitiesByTags"`
-Expected: PASS
-
-**Step 5: Commit**
-
-```bash
-git add wisp-srv/src/Infra/Db/Activity.hs wisp-srv/test/Infra/Db/ActivitySpec.hs
-git commit -m "feat(db): add getActivitiesByTags for knowledge retrieval"
-```
-
----
-
-### Task 15: Add Note Tool to Concierge
+### Task 13: Add Note Tool to Concierge
 
 **Files:**
 - Modify: `wisp-srv/src/Agents/Concierge.hs`
 - Modify: `wisp-srv/test/Agents/ConciergeSpec.hs`
 
-**Step 1: Add add_note tool**
+**Step 1: Add add_note tool to system prompt**
 
 In the system prompt tools section, add:
 
@@ -1489,7 +1277,7 @@ In the system prompt tools section, add:
 - add_note: Save a piece of knowledge
   Parameters:
     - content: Text content of the note
-    - tags: List of tags (will be normalized, suggested from existing)
+    - tags: List of tags (will be normalized)
 ```
 
 **Step 2: Handle add_note in tool execution**
@@ -1523,40 +1311,38 @@ git commit -m "feat(concierge): add add_note tool for knowledge capture"
 
 ---
 
-### Task 16: Inject Soul into Agent System Prompts
+### Task 14: Inject Soul into Agent System Prompts
 
 **Files:**
 - Modify: `wisp-srv/src/Agents/Concierge.hs`
 - Modify: `wisp-srv/src/Agents/Scheduler.hs`
 - Modify: `wisp-srv/src/Agents/Insights.hs`
 
-**Step 1: Update system prompt generation**
-
-For each agent, fetch soul and inject into system prompt:
+**Step 1: Create shared soul injection function**
 
 ```haskell
-buildSystemPrompt :: Soul -> Text
-buildSystemPrompt soul = basePrompt <> soulSection
-  where
-    soulSection
-      | T.null (soulPersonality soul) && null (soulInsights soul) = ""
-      | otherwise = "\n\n## Your Personality & Insights\n\n" <>
-          (if T.null (soulPersonality soul)
-           then ""
-           else "Personality: " <> soulPersonality soul <> "\n\n") <>
-          (if null (soulInsights soul)
-           then ""
-           else "Insights about this user:\n" <>
-                T.unlines (map ("- " <>) (soulInsights soul)))
+-- In a shared module or each agent file
+buildSoulSection :: Soul -> Text
+buildSoulSection soul
+  | T.null (soulPersonality soul) && null (soulInsights soul) = ""
+  | otherwise = "\n\n## Your Personality & Insights\n\n" <>
+      (if T.null (soulPersonality soul)
+       then ""
+       else "Personality: " <> soulPersonality soul <> "\n\n") <>
+      (if null (soulInsights soul)
+       then ""
+       else "Insights about this user:\n" <>
+            T.unlines (map ("- " <>) (soulInsights soul)))
 ```
 
-**Step 2: Fetch soul in context assembly**
+**Step 2: Fetch soul in context assembly and append to system prompt**
 
 ```haskell
 handleChatWithContext :: ... -> App ...
 handleChatWithContext ... = do
   soul <- getOrCreateSoul agentId
-  -- Include soul in context assembly
+  let systemPromptWithSoul = baseSystemPrompt <> buildSoulSection soul
+  -- Use systemPromptWithSoul in LLM call
   ...
 ```
 
@@ -1576,7 +1362,7 @@ git commit -m "feat(agents): inject soul into system prompts"
 
 ## Phase 4: HTTP API
 
-### Task 17: Tags API Endpoints
+### Task 15: Tags API Endpoints
 
 **Files:**
 - Create: `wisp-srv/src/Http/Handlers/Tags.hs`
@@ -1594,9 +1380,10 @@ module Http.Handlers.Tags
 import Control.Monad.Reader (ReaderT)
 import Control.Monad.Trans.Class (lift)
 import Data.Aeson (object, (.=))
-import Web.Scotty.Trans (ActionT, json, queryParam)
+import Data.Text (Text)
+import Web.Scotty.Trans (ActionT, json, queryParamMaybe)
 import App.Monad (Env)
-import Infra.Db.Tag (getAllTags, searchTags)
+import Infra.Db.Activity (getAllTags, searchTags)
 
 -- GET /tags
 getTags :: ActionT (ReaderT Env IO) ()
@@ -1607,9 +1394,14 @@ getTags = do
 -- GET /tags/search?q=...
 searchTagsHandler :: ActionT (ReaderT Env IO) ()
 searchTagsHandler = do
-  q <- queryParam "q"
-  tags <- lift $ searchTags q 20
-  json $ object ["tags" .= tags]
+  mq <- queryParamMaybe "q"
+  case mq of
+    Just q -> do
+      tags <- lift $ searchTags q 20
+      json $ object ["tags" .= tags]
+    Nothing -> do
+      tags <- lift getAllTags
+      json $ object ["tags" .= tags]
 ```
 
 **Step 2: Add routes**
@@ -1628,7 +1420,7 @@ git commit -m "feat(http): add tags API endpoints"
 
 ---
 
-### Task 18: Sessions API Endpoints
+### Task 16: Sessions API Endpoints
 
 **Files:**
 - Create: `wisp-srv/src/Http/Handlers/Sessions.hs`
@@ -1649,7 +1441,7 @@ import Control.Monad.Trans.Class (lift)
 import Data.Aeson (object, (.=))
 import Data.Text (Text)
 import Network.HTTP.Types.Status (status404)
-import Web.Scotty.Trans (ActionT, json, status, pathParam, queryParam)
+import Web.Scotty.Trans (ActionT, json, status, pathParam, queryParamMaybe)
 import App.Monad (Env)
 import Domain.Session (SessionId(..))
 import Infra.Db.Session
@@ -1657,9 +1449,13 @@ import Infra.Db.Session
 -- GET /sessions?agent=...
 getSessions :: ActionT (ReaderT Env IO) ()
 getSessions = do
-  agentId <- queryParam "agent"
-  sessions <- lift $ getRecentSessions agentId 20
-  json $ object ["sessions" .= sessions]
+  mAgentId <- queryParamMaybe "agent"
+  case mAgentId of
+    Just agentId -> do
+      sessions <- lift $ getRecentSessions agentId 20
+      json $ object ["sessions" .= sessions]
+    Nothing ->
+      json $ object ["error" .= ("agent parameter required" :: Text)]
 
 -- GET /sessions/:id
 getSessionById :: ActionT (ReaderT Env IO) ()
@@ -1697,7 +1493,7 @@ git commit -m "feat(http): add sessions API endpoints"
 
 ---
 
-### Task 19: Souls API Endpoints
+### Task 17: Souls API Endpoints
 
 **Files:**
 - Create: `wisp-srv/src/Http/Handlers/Souls.hs`
@@ -1714,7 +1510,7 @@ module Http.Handlers.Souls
 
 import Control.Monad.Reader (ReaderT)
 import Control.Monad.Trans.Class (lift)
-import Data.Aeson (object, (.=), FromJSON(..), withObject, (.:))
+import Data.Aeson (object, (.=), FromJSON(..), withObject, (.:?))
 import Data.Text (Text)
 import Web.Scotty.Trans (ActionT, json, pathParam, jsonData)
 import App.Monad (Env)
@@ -1745,7 +1541,6 @@ updateSoulHandler :: ActionT (ReaderT Env IO) ()
 updateSoulHandler = do
   agentId <- pathParam "agent_id"
   update <- jsonData
-  -- Apply updates
   case suPersonality update of
     Just p -> lift $ updateSoulPersonality agentId p
     Nothing -> pure ()
@@ -1755,7 +1550,6 @@ updateSoulHandler = do
   case suRemoveInsights update of
     Just insights -> mapM_ (lift . removeInsight agentId) insights
     Nothing -> pure ()
-  -- Return updated soul
   soul <- lift $ getOrCreateSoul agentId
   json soul
 ```
@@ -1776,7 +1570,7 @@ git commit -m "feat(http): add souls API endpoints"
 
 ---
 
-### Task 20: Run All Tests and Final Verification
+### Task 18: Run All Tests and Final Verification
 
 **Step 1: Run full test suite**
 
@@ -1790,13 +1584,12 @@ Expected: Build succeeds
 
 **Step 3: Verify migrations apply**
 
-Run: Start the server and verify migrations run without error.
+Start the server and verify migrations run without error.
 
 **Step 4: Final commit (if any cleanup needed)**
 
 ```bash
 git status
-# If clean, done. If changes needed:
 git add -A
 git commit -m "chore: final cleanup for knowledge-memory feature"
 ```
@@ -1807,16 +1600,16 @@ git commit -m "chore: final cleanup for knowledge-memory feature"
 
 | Phase | Tasks | What It Delivers |
 |-------|-------|------------------|
-| 1. Foundation | 1-5 | Tags table, Note activity source, tag CRUD |
-| 2. Memory | 6-12 | Sessions, Summaries, Souls tables and domain models |
-| 3. Integration | 13-16 | Context assembly with soul, knowledge retrieval, add_note tool |
-| 4. HTTP API | 17-20 | REST endpoints for tags, sessions, souls |
+| 1. Foundation | 1-4 | Tags column on activities, Note source, tag operations |
+| 2. Memory | 5-11 | Sessions, Summaries, Souls tables and domain models |
+| 3. Integration | 12-14 | Context assembly with soul, knowledge retrieval, add_note tool |
+| 4. HTTP API | 15-18 | REST endpoints for tags, sessions, souls |
 
-**Total: 20 tasks**
+**Total: 18 tasks**
 
 After completing this plan, you'll have:
-- Notes as tagged Activities flowing through classification
+- Notes as tagged Activities (`tags TEXT[]`) flowing through classification
 - Per-agent sessions with message accumulation
 - Summaries for compressed session history
 - Souls with personality and insights injected into prompts
-- HTTP API for managing all new entities
+- HTTP API for managing all entities
