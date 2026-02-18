@@ -71,6 +71,9 @@ executable wisp-srv
         Infra.Db.PollState
         Infra.Db.Receipt
         Infra.Db.Run
+        Infra.Db.Session
+        Infra.Db.Soul
+        Infra.Db.Summary
         Infra.Claude.Client
         Infra.Google.Auth
         Infra.Google.Calendar
@@ -178,6 +181,7 @@ test-suite wisp-srv-test
         Http.Handlers.HealthSpec
         Http.Handlers.People
         Http.Handlers.Pipeline
+        Http.Handlers.Runs
         Http.Routes
         Http.Server
         Infra.Db.Account
@@ -199,6 +203,12 @@ test-suite wisp-srv-test
         Infra.Db.ReceiptSpec
         Infra.Db.Run
         Infra.Db.RunSpec
+        Infra.Db.Session
+        Infra.Db.SessionSpec
+        Infra.Db.Soul
+        Infra.Db.SoulSpec
+        Infra.Db.Summary
+        Infra.Db.SummarySpec
         Infra.Claude.Client
         Infra.Claude.ClientSpec
         Infra.Google.Auth
