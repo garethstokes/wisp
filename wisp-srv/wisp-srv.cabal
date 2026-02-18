@@ -47,6 +47,9 @@ executable wisp-srv
         Domain.Receipt
         Domain.Run
         Domain.Schema
+        Domain.Session
+        Domain.Soul
+        Domain.Summary
         Http.Handlers.Activities
         Http.Handlers.Agents
         Http.Handlers.Auth
@@ -157,6 +160,12 @@ test-suite wisp-srv-test
         Domain.RunSpec
         Domain.Schema
         Domain.SchemaSpec
+        Domain.Session
+        Domain.SessionSpec
+        Domain.Soul
+        Domain.SoulSpec
+        Domain.Summary
+        Domain.SummarySpec
         App.Config
         App.ConfigSpec
         App.Monad
