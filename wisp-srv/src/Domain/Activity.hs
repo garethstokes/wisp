@@ -8,11 +8,11 @@ module Domain.Activity
   , normalizeTags
   ) where
 
-import Data.Aeson (ToJSON(..), FromJSON(..), Value, withText)
+import Data.Aeson (ToJSON(..), FromJSON(..), Value, object, withText, (.=))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Time (UTCTime)
-import Domain.Id (EntityId)
+import Domain.Id (EntityId, unEntityId)
 import GHC.Generics (Generic)
 
 data ActivitySource = Email | Calendar | Conversation | Note
@@ -83,6 +83,29 @@ data Activity = Activity
   , activityTags :: [Text]
   , activityParentId :: Maybe EntityId
   } deriving (Show)
+
+instance ToJSON Activity where
+  toJSON a = object
+    [ "id" .= unEntityId (activityId a)
+    , "account_id" .= unEntityId (activityAccountId a)
+    , "source" .= activitySource a
+    , "source_id" .= activitySourceId a
+    , "status" .= activityStatus a
+    , "title" .= activityTitle a
+    , "summary" .= activitySummary a
+    , "sender_email" .= activitySenderEmail a
+    , "starts_at" .= activityStartsAt a
+    , "ends_at" .= activityEndsAt a
+    , "created_at" .= activityCreatedAt a
+    , "personas" .= activityPersonas a
+    , "activity_type" .= activityType a
+    , "urgency" .= activityUrgency a
+    , "autonomy_tier" .= activityAutonomyTier a
+    , "confidence" .= activityConfidence a
+    , "person_id" .= fmap unEntityId (activityPersonId a)
+    , "tags" .= activityTags a
+    , "parent_id" .= fmap unEntityId (activityParentId a)
+    ]
 
 -- For creating new activities
 data NewActivity = NewActivity
