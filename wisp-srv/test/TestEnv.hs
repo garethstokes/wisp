@@ -1,6 +1,7 @@
 module TestEnv
   ( testConfig
   , withTestEnv
+  , runTestApp
   ) where
 
 import Database.PostgreSQL.Simple
@@ -41,6 +42,11 @@ withTestEnv :: (Env -> IO a) -> IO a
 withTestEnv action = do
   conn <- connectPostgreSQL "postgres://localhost/wisp_test"
   _ <- execute_ conn "begin"
+  -- Insert a test account so foreign key constraints are satisfied
+  _ <- execute_ conn
+    "INSERT INTO accounts (id, email, display_name) \
+    \VALUES ('test-account', 'test@example.com', 'Test User') \
+    \ON CONFLICT (id) DO NOTHING"
   lgr <- newStdoutLoggerSet defaultBufSize
   cq <- newClassificationQueue
   let env = Env
@@ -52,3 +58,7 @@ withTestEnv action = do
   result <- action env
   _ <- execute_ conn "rollback"
   pure result
+
+-- Run an App action in the test environment
+runTestApp :: Env -> App a -> IO a
+runTestApp env action = runApp env action

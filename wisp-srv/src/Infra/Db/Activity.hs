@@ -2,6 +2,7 @@
 module Infra.Db.Activity
   ( insertActivity
   , insertConversation
+  , insertNote
   , activityExists
   , activityExistsForAccount
   , getActivity
@@ -16,13 +17,17 @@ module Infra.Db.Activity
   , getPendingEmails
   , updateActivityStatus
   , updateActivityClassification
+  , updateActivityTags
   , searchActivities
   , getActivitySummaryStats
+  , getActivitiesByTags
+  , getAllTags
+  , searchTags
   , DbActivity(..)
   ) where
 
 import Control.Monad.IO.Class (liftIO)
-import Data.Aeson ()
+import Data.Aeson (Value)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
@@ -31,7 +36,7 @@ import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.FromRow
 import Database.PostgreSQL.Simple.Types (PGArray(..), Query(..))
 import Domain.Id (EntityId(..), newEntityId)
-import Domain.Activity
+import Domain.Activity (Activity(..), ActivitySource(..), ActivityStatus(..), NewActivity(..), normalizeTag, normalizeTags)
 import Domain.Classification (Classification(..), ActivityType(..), Urgency(..))
 import App.Monad (App, getConn)
 
@@ -427,3 +432,70 @@ insertConversation chatQuery response = do
     , response
     )
   pure aid
+
+-- Insert a note (returns activity ID)
+insertNote :: EntityId -> Text -> [Text] -> Value -> App (Maybe EntityId)
+insertNote accountId content tagNames rawMeta = do
+  conn <- getConn
+  aid <- liftIO newEntityId
+  let normalizedTags = normalizeTags tagNames
+  n <- liftIO $ execute conn
+    "INSERT INTO activities \
+    \(id, account_id, source, source_id, raw, title, status, tags) \
+    \VALUES (?, ?, 'note', ?, ?, ?, 'pending', ?)"
+    ( unEntityId aid
+    , unEntityId accountId
+    , "note-" <> unEntityId aid
+    , rawMeta
+    , content
+    , PGArray normalizedTags
+    )
+  pure $ if n > 0 then Just aid else Nothing
+
+-- Get activities (notes) by tags - matches ANY of the given tags
+getActivitiesByTags :: EntityId -> [Text] -> Int -> App [Activity]
+getActivitiesByTags accountId tagNames limit = do
+  conn <- getConn
+  let normalizedTags = normalizeTags tagNames
+  results <- liftIO $ query conn
+    "SELECT id, account_id, source, source_id, raw, status, title, summary, \
+    \sender_email, starts_at, ends_at, created_at, \
+    \personas, activity_type, urgency, autonomy_tier, confidence, person_id, \
+    \tags, parent_id \
+    \FROM activities \
+    \WHERE account_id = ? AND source = 'note' AND tags && ? \
+    \ORDER BY created_at DESC \
+    \LIMIT ?"
+    (unEntityId accountId, PGArray normalizedTags, limit)
+  pure $ map unDbActivity results
+
+-- Get all unique tags (for autocomplete/suggestion)
+getAllTags :: EntityId -> App [Text]
+getAllTags accountId = do
+  conn <- getConn
+  results <- liftIO $ query conn
+    "SELECT DISTINCT unnest(tags) AS tag FROM activities \
+    \WHERE account_id = ? AND tags != '{}' ORDER BY tag"
+    (Only $ unEntityId accountId)
+  pure $ map fromOnly results
+
+-- Search tags by prefix (for autocomplete)
+searchTags :: EntityId -> Text -> Int -> App [Text]
+searchTags accountId prefix limit = do
+  conn <- getConn
+  let pattern = normalizeTag prefix <> "%"
+  results <- liftIO $ query conn
+    "SELECT DISTINCT tag FROM (SELECT unnest(tags) AS tag FROM activities WHERE account_id = ?) t \
+    \WHERE tag ILIKE ? ORDER BY tag LIMIT ?"
+    (unEntityId accountId, pattern, limit)
+  pure $ map fromOnly results
+
+-- Update tags for an activity
+updateActivityTags :: EntityId -> [Text] -> App ()
+updateActivityTags aid tagNames = do
+  conn <- getConn
+  let normalizedTags = normalizeTags tagNames
+  _ <- liftIO $ execute conn
+    "UPDATE activities SET tags = ?, updated_at = now() WHERE id = ?"
+    (PGArray normalizedTags, unEntityId aid)
+  pure ()
