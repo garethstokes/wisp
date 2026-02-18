@@ -3,7 +3,7 @@ module Http.Routes
   ) where
 
 import Control.Monad.Reader (ReaderT)
-import Web.Scotty.Trans (ScottyT, get, post)
+import Web.Scotty.Trans (ScottyT, get, post, put)
 import Http.Handlers.Agents (getAgents, getAgentsList, getAgentByName, postAgentChat, postAgentActivateSkill, postAgentDeactivate)
 import Http.Handlers.Auth (getGoogleAuth, getGoogleCallback, getAuthStatus)
 import Http.Handlers.Health (getHealth)
@@ -12,6 +12,7 @@ import Http.Handlers.Chat (postChat)
 import Http.Handlers.People (getPeople, getPersonById)
 import Http.Handlers.Pipeline (postRunPipeline, postClassifyActivity)
 import Http.Handlers.Runs (getRuns, getRunById)
+import Http.Handlers.Skills (getSkillsList, getSkillByName, putSkillPrompt)
 import App.Monad (Env)
 
 routes :: ScottyT (ReaderT Env IO) ()
@@ -28,6 +29,11 @@ routes = do
   post "/api/agents/:name/chat" postAgentChat
   post "/api/agents/:name/activate/:skill" postAgentActivateSkill
   post "/api/agents/:name/deactivate" postAgentDeactivate
+
+  -- Skills (new API)
+  get "/api/skills" getSkillsList
+  get "/api/skills/:name" getSkillByName
+  put "/api/skills/:name" putSkillPrompt
 
   -- Auth
   get "/auth/google" getGoogleAuth

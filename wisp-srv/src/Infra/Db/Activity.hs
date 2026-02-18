@@ -19,6 +19,7 @@ module Infra.Db.Activity
   , updateActivityClassification
   , updateActivityTags
   , updateActivityRaw
+  , updateActivityTitle
   , searchActivities
   , getActivitySummaryStats
   , getActivitiesByTags
@@ -508,4 +509,13 @@ updateActivityRaw aid rawValue = do
   _ <- liftIO $ execute conn
     "UPDATE activities SET raw = ?, updated_at = now() WHERE id = ?"
     (rawValue, unEntityId aid)
+  pure ()
+
+-- | Update activity title
+updateActivityTitle :: EntityId -> Text -> App ()
+updateActivityTitle aid newTitle = do
+  conn <- getConn
+  _ <- liftIO $ execute conn
+    "UPDATE activities SET title = ?, updated_at = now() WHERE id = ?"
+    (newTitle, unEntityId aid)
   pure ()

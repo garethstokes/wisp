@@ -62,6 +62,7 @@ executable wisp-srv
         Http.Handlers.People
         Http.Handlers.Pipeline
         Http.Handlers.Runs
+        Http.Handlers.Skills
         Http.Routes
         Http.Server
         Infra.Db.Account
