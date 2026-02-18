@@ -3,12 +3,14 @@
 -- Agents are named personas with memory (soul) that can activate skills.
 module Agents.Core
   ( Agent(..)
+  , ToolExecutionResult(..)
   , loadAgent
   , buildSystemPrompt
   , loadSkillPrompt
+  , executeTool
   ) where
 
-import Data.Aeson (decode, encode)
+import Data.Aeson (Value, decode, encode)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Domain.Agent (AgentName, AgentConfig(..), agentTag, emptyAgentConfig)
@@ -17,8 +19,8 @@ import Domain.Skill (SkillName, skillPromptTags)
 import Domain.Soul (Soul(..))
 import Domain.Activity (Activity(..), activityRaw, activityTitle)
 import Domain.Id (EntityId)
-import Skills.Registry (Skill(..), getSkill)
-import Skills.Base (baseToolNames)
+import Skills.Registry (Skill(..), SkillToolResult(..), getSkill, executeSkillTool)
+import Skills.Base (baseToolNames, baseToolNamesWithSkill, parseBaseToolCall, executeBaseTool, BaseToolResult(..))
 import Infra.Db.Activity (getActivitiesByTags)
 import Infra.Db.Soul (getOrCreateSoul)
 import App.Monad (App)
@@ -99,3 +101,47 @@ loadSkillPrompt accountId name = do
   case notes of
     [] -> pure Nothing
     (note:_) -> pure $ activityTitle note
+
+-- | Result of tool execution
+data ToolExecutionResult
+  = ToolExecSuccess Value          -- ^ Tool executed successfully
+  | ToolExecError Text             -- ^ Tool execution failed
+  | ToolExecPermission Text Text   -- ^ Requires user permission (action, message)
+  deriving (Show, Eq)
+
+-- | Execute a tool call for an agent
+-- Routes base tools to Skills.Base, skill-specific tools to the active skill
+executeTool :: Agent -> EntityId -> Text -> Value -> App ToolExecutionResult
+executeTool agent accountId toolName params
+  -- Check if it's a base tool
+  | toolName `elem` allBaseTools = executeBaseToolCall accountId toolName params
+  -- Otherwise try skill tools
+  | otherwise = case agentSkill agent of
+      Nothing -> pure $ ToolExecError $ "No skill active for tool: " <> toolName
+      Just skill
+        | toolName `elem` skillToolNames skill ->
+            executeSkillToolCall skill accountId toolName params
+        | otherwise ->
+            pure $ ToolExecError $ "Tool not available: " <> toolName
+  where
+    allBaseTools = baseToolNames <> baseToolNamesWithSkill
+
+-- | Execute a base tool call
+executeBaseToolCall :: EntityId -> Text -> Value -> App ToolExecutionResult
+executeBaseToolCall accountId toolName params =
+  case parseBaseToolCall toolName params of
+    Left err -> pure $ ToolExecError err
+    Right toolCall -> do
+      result <- executeBaseTool accountId toolCall
+      pure $ case result of
+        ToolSuccess v -> ToolExecSuccess v
+        ToolError e -> ToolExecError e
+        PermissionRequest action msg -> ToolExecPermission action msg
+
+-- | Execute a skill tool call
+executeSkillToolCall :: Skill -> EntityId -> Text -> Value -> App ToolExecutionResult
+executeSkillToolCall skill accountId toolName params = do
+  result <- executeSkillTool skill accountId toolName params
+  pure $ case result of
+    SkillToolSuccess v -> ToolExecSuccess v
+    SkillToolError e -> ToolExecError e
