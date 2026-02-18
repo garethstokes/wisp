@@ -58,11 +58,14 @@ instance FromRow DbActivity where
     <*> field                          -- autonomy_tier
     <*> field                          -- confidence
     <*> (fmap EntityId <$> field)     -- person_id
+    <*> (maybe [] fromPGArray <$> field) -- tags
+    <*> (fmap EntityId <$> field)     -- parent_id
     where
       parseSource :: Text -> ActivitySource
       parseSource "email" = Email
       parseSource "calendar" = Calendar
       parseSource "conversation" = Conversation
+      parseSource "note" = Note
       parseSource _ = Email  -- default
 
       parseStatus :: Text -> ActivityStatus
@@ -83,6 +86,7 @@ insertActivity new = do
         Email -> "email" :: Text
         Calendar -> "calendar"
         Conversation -> "conversation"
+        Note -> "note"
   n <- liftIO $ execute conn
     "insert into activities \
     \(id, account_id, source, source_id, raw, title, sender_email, starts_at, ends_at) \
@@ -108,6 +112,7 @@ activityExists src srcId = do
         Email -> "email" :: Text
         Calendar -> "calendar"
         Conversation -> "conversation"
+        Note -> "note"
   results <- liftIO $ query conn
     "select 1 from activities where source = ? and source_id = ? limit 1"
     (srcText, srcId)
@@ -120,7 +125,8 @@ getActivity aid = do
   results <- liftIO $ query conn
     "select id, account_id, source, source_id, raw, status, title, summary, \
     \sender_email, starts_at, ends_at, created_at, \
-    \personas, activity_type, urgency, autonomy_tier, confidence, person_id \
+    \personas, activity_type, urgency, autonomy_tier, confidence, person_id, \
+    \tags, parent_id \
     \from activities where id = ?"
     (Only $ unEntityId aid)
   pure $ case results of
@@ -134,7 +140,8 @@ getActivitiesForToday limit = do
   results <- liftIO $ query conn
     "select id, account_id, source, source_id, raw, status, title, summary, \
     \sender_email, starts_at, ends_at, created_at, \
-    \personas, activity_type, urgency, autonomy_tier, confidence, person_id \
+    \personas, activity_type, urgency, autonomy_tier, confidence, person_id, \
+    \tags, parent_id \
     \from activities \
     \where status = 'surfaced' \
     \   or status = 'quarantined' \
@@ -162,7 +169,8 @@ getRecentActivities hours = do
   results <- liftIO $ query conn
     "select id, account_id, source, source_id, raw, status, title, summary, \
     \sender_email, starts_at, ends_at, created_at, \
-    \personas, activity_type, urgency, autonomy_tier, confidence, person_id \
+    \personas, activity_type, urgency, autonomy_tier, confidence, person_id, \
+    \tags, parent_id \
     \from activities \
     \where created_at > now() - interval '1 hour' * ? \
     \order by created_at desc \
@@ -177,7 +185,8 @@ getTodaysCalendarEvents = do
   results <- liftIO $ query conn
     "select id, account_id, source, source_id, raw, status, title, summary, \
     \sender_email, starts_at, ends_at, created_at, \
-    \personas, activity_type, urgency, autonomy_tier, confidence, person_id \
+    \personas, activity_type, urgency, autonomy_tier, confidence, person_id, \
+    \tags, parent_id \
     \from activities \
     \where source = 'calendar' \
     \  and starts_at >= date_trunc('day', now()) \
@@ -193,7 +202,8 @@ getCalendarEventsInRange startTime endTime = do
   results <- liftIO $ query conn
     "select id, account_id, source, source_id, raw, status, title, summary, \
     \sender_email, starts_at, ends_at, created_at, \
-    \personas, activity_type, urgency, autonomy_tier, confidence, person_id \
+    \personas, activity_type, urgency, autonomy_tier, confidence, person_id, \
+    \tags, parent_id \
     \from activities \
     \where source = 'calendar' \
     \  and starts_at >= ? \
@@ -209,7 +219,8 @@ getUpcomingCalendarEvents days = do
   results <- liftIO $ query conn
     "select id, account_id, source, source_id, raw, status, title, summary, \
     \sender_email, starts_at, ends_at, created_at, \
-    \personas, activity_type, urgency, autonomy_tier, confidence, person_id \
+    \personas, activity_type, urgency, autonomy_tier, confidence, person_id, \
+    \tags, parent_id \
     \from activities \
     \where source = 'calendar' \
     \  and starts_at >= now() \
@@ -226,7 +237,8 @@ searchActivities searchTerm limit = do
   results <- liftIO $ query conn
     "select id, account_id, source, source_id, raw, status, title, summary, \
     \sender_email, starts_at, ends_at, created_at, \
-    \personas, activity_type, urgency, autonomy_tier, confidence, person_id \
+    \personas, activity_type, urgency, autonomy_tier, confidence, person_id, \
+    \tags, parent_id \
     \from activities \
     \where title ilike ? or summary ilike ? or sender_email ilike ? \
     \order by created_at desc \
@@ -251,7 +263,8 @@ getPendingEmails limit = do
   results <- liftIO $ query conn
     "select id, account_id, source, source_id, raw, status, title, summary, \
     \sender_email, starts_at, ends_at, created_at, \
-    \personas, activity_type, urgency, autonomy_tier, confidence, person_id \
+    \personas, activity_type, urgency, autonomy_tier, confidence, person_id, \
+    \tags, parent_id \
     \from activities \
     \where source = 'email' and status = 'pending' \
     \order by created_at desc \
@@ -273,7 +286,8 @@ getActivitiesByStatus st limit = do
   results <- liftIO $ query conn
     "select id, account_id, source, source_id, raw, status, title, summary, \
     \sender_email, starts_at, ends_at, created_at, \
-    \personas, activity_type, urgency, autonomy_tier, confidence, person_id \
+    \personas, activity_type, urgency, autonomy_tier, confidence, person_id, \
+    \tags, parent_id \
     \from activities where status = ? \
     \order by created_at desc limit ?"
     (statusText, limit)
@@ -285,7 +299,8 @@ getActivitiesFiltered mStatus mSince mBefore limit = do
   conn <- getConn
   let baseQuery = "select id, account_id, source, source_id, raw, status, title, summary, \
                   \sender_email, starts_at, ends_at, created_at, \
-                  \personas, activity_type, urgency, autonomy_tier, confidence, person_id \
+                  \personas, activity_type, urgency, autonomy_tier, confidence, person_id, \
+                  \tags, parent_id \
                   \from activities where 1=1"
       statusClause = case mStatus of
         Just st -> " and status = '" <> statusToText st <> "'"
@@ -360,6 +375,7 @@ activityExistsForAccount accountId src srcId = do
         Email -> "email" :: Text
         Calendar -> "calendar"
         Conversation -> "conversation"
+        Note -> "note"
   results <- liftIO $ query conn
     "select 1 from activities where account_id = ? and source = ? and source_id = ? limit 1"
     (unEntityId accountId, srcText, srcId)

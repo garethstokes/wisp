@@ -27,6 +27,7 @@ classifyActivity activity = do
         Email -> "email"
         Calendar -> "calendar"
         Conversation -> "conversation"
+        Note -> "note"
   let prompt = buildClassificationPrompt source (activityTitle activity) (activityRaw activity)
   result <- liftIO $ callClaude apiKey model prompt
   pure $ case result of
