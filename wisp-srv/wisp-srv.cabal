@@ -54,6 +54,7 @@ executable wisp-srv
         Domain.Skill
         Domain.Soul
         Domain.Summary
+        Domain.Tenant
         Http.Handlers.Activities
         Http.Handlers.Agents
         Http.Handlers.Auth
@@ -63,6 +64,7 @@ executable wisp-srv
         Http.Handlers.Pipeline
         Http.Handlers.Runs
         Http.Handlers.Skills
+        Http.Handlers.Tenants
         Http.Routes
         Http.Server
         Infra.Db.Account
@@ -79,7 +81,9 @@ executable wisp-srv
         Infra.Db.Session
         Infra.Db.Soul
         Infra.Db.Summary
+        Infra.Db.Tenant
         Infra.Claude.Client
+        Infra.GitHub.Auth
         Infra.Google.Auth
         Infra.Google.Calendar
         Infra.Google.Gmail
@@ -115,7 +119,8 @@ executable wisp-srv
         async,
         stm,
         neat-interpolation,
-        process
+        process,
+        uuid
 
 test-suite wisp-srv-test
     import:           warnings
@@ -178,6 +183,8 @@ test-suite wisp-srv-test
         Domain.SoulSpec
         Domain.Summary
         Domain.SummarySpec
+        Domain.Tenant
+        Domain.TenantSpec
         App.Config
         App.ConfigSpec
         App.Monad
@@ -191,6 +198,7 @@ test-suite wisp-srv-test
         Http.Handlers.People
         Http.Handlers.Pipeline
         Http.Handlers.Runs
+        Http.Handlers.Tenants
         Http.Routes
         Http.Server
         Infra.Db.Account
@@ -218,8 +226,12 @@ test-suite wisp-srv-test
         Infra.Db.SoulSpec
         Infra.Db.Summary
         Infra.Db.SummarySpec
+        Infra.Db.Tenant
+        Infra.Db.TenantSpec
         Infra.Claude.Client
         Infra.Claude.ClientSpec
+        Infra.GitHub.Auth
+        Infra.GitHub.AuthSpec
         Infra.Google.Auth
         Infra.Google.AuthSpec
         Infra.Google.Calendar
@@ -270,4 +282,5 @@ test-suite wisp-srv-test
         async,
         stm,
         neat-interpolation,
-        process
+        process,
+        uuid
