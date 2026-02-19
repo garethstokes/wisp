@@ -84,6 +84,7 @@ executable wisp-srv
         Infra.Db.Tenant
         Infra.Claude.Client
         Infra.GitHub.Auth
+        Infra.GitHub.Events
         Infra.Google.Auth
         Infra.Google.Calendar
         Infra.Google.Gmail
@@ -120,7 +121,8 @@ executable wisp-srv
         stm,
         neat-interpolation,
         process,
-        uuid
+        uuid,
+        case-insensitive
 
 test-suite wisp-srv-test
     import:           warnings
@@ -232,6 +234,8 @@ test-suite wisp-srv-test
         Infra.Claude.ClientSpec
         Infra.GitHub.Auth
         Infra.GitHub.AuthSpec
+        Infra.GitHub.Events
+        Infra.GitHub.EventsSpec
         Infra.Google.Auth
         Infra.Google.AuthSpec
         Infra.Google.Calendar
@@ -283,4 +287,5 @@ test-suite wisp-srv-test
         stm,
         neat-interpolation,
         process,
-        uuid
+        uuid,
+        case-insensitive
