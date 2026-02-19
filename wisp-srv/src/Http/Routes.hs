@@ -4,8 +4,8 @@ module Http.Routes
 
 import Control.Monad.Reader (ReaderT)
 import Web.Scotty.Trans (ScottyT, get, post, put)
-import Http.Handlers.Agents (getAgents, getAgentsList, getAgentByName, postAgentChat, postAgentActivateSkill, postAgentDeactivate)
-import Http.Handlers.Auth (getGoogleAuth, getGoogleCallback, getAuthStatus)
+import Http.Handlers.Agents (getAgentsList, getAgentByName, postAgentActivateSkill, postAgentDeactivate)
+import Http.Handlers.Auth (getGoogleAuth, getGoogleCallback, getGitHubAuth, getGitHubCallback, getAuthStatus)
 import Http.Handlers.Health (getHealth)
 import Http.Handlers.Activities (getActivities, getActivityStats, getActivityById, getActivityLogs, getInbox, getReview, approveActivity, dismissActivity, triggerPoll)
 import Http.Handlers.Chat (postChat)
@@ -13,6 +13,7 @@ import Http.Handlers.People (getPeople, getPersonById)
 import Http.Handlers.Pipeline (postRunPipeline, postClassifyActivity)
 import Http.Handlers.Runs (getRuns, getRunById)
 import Http.Handlers.Skills (getSkillsList, getSkillByName, putSkillPrompt)
+import Http.Handlers.Tenants (getTenantsList, postTenant, getTenantById)
 import App.Monad (Env)
 
 routes :: ScottyT (ReaderT Env IO) ()
@@ -20,13 +21,9 @@ routes = do
   -- Health
   get "/health" getHealth
 
-  -- Agents (legacy)
-  get "/agents" getAgents
-
-  -- Agents (new API)
+  -- Agents
   get "/api/agents" getAgentsList
   get "/api/agents/:name" getAgentByName
-  post "/api/agents/:name/chat" postAgentChat
   post "/api/agents/:name/activate/:skill" postAgentActivateSkill
   post "/api/agents/:name/deactivate" postAgentDeactivate
 
@@ -35,9 +32,16 @@ routes = do
   get "/api/skills/:name" getSkillByName
   put "/api/skills/:name" putSkillPrompt
 
+  -- Tenants
+  get "/api/tenants" getTenantsList
+  post "/api/tenants" postTenant
+  get "/api/tenants/:id" getTenantById
+
   -- Auth
   get "/auth/google" getGoogleAuth
   get "/auth/google/callback" getGoogleCallback
+  get "/auth/github" getGitHubAuth
+  get "/auth/github/callback" getGitHubCallback
   get "/auth/status" getAuthStatus
 
   -- Activities
