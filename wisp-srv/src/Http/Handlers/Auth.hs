@@ -19,7 +19,9 @@ import App.Config (Config(..), ServerConfig(..), GoogleConfig(..))
 import Infra.Google.Auth (OAuthConfig(..), buildAuthUrl, exchangeCode, getUserInfo, TokenResponse(..), UserInfo(..))
 import Infra.Db.Auth (saveToken)
 import Infra.Db.Account (upsertAccount, getAllAccounts)
-import Domain.Account (Account(..))
+import Infra.Db.Tenant (getAllTenants)
+import Domain.Account (Account(..), accountIdentifier)
+import Domain.Tenant (Tenant(..))
 
 -- Build OAuthConfig from app config
 mkOAuthConfig :: Config -> OAuthConfig
@@ -82,25 +84,38 @@ getGoogleCallback = do
                   ]
                 json $ object
                   [ "status" .= ("authenticated" :: Text)
-                  , "email" .= accountEmail account
+                  , "email" .= accountIdentifier account
                   , "expires_at" .= expiresAt
                   ]
 
--- Check auth status (shows all connected accounts)
+-- Check auth status (shows all connected accounts and active tenant)
 getAuthStatus :: ActionT (ReaderT Env IO) ()
 getAuthStatus = do
   accounts <- lift getAllAccounts
+  tenants <- lift getAllTenants
   now <- liftIO getCurrentTime
   let accountInfos = map (accountToJson now) accounts
+  -- For now, use the first tenant as "active" (TODO: get from session/token)
+  let activeTenant = case tenants of
+        (t:_) -> Just $ tenantToJson t
+        [] -> Nothing
   json $ object
     [ "accounts" .= accountInfos
     , "count" .= length accounts
+    , "tenant" .= activeTenant
     ]
 
 -- Convert account to JSON object
 accountToJson :: UTCTime -> Account -> Data.Aeson.Value
 accountToJson _ acc = object
-  [ "email" .= accountEmail acc
+  [ "email" .= accountIdentifier acc
   , "display_name" .= accountDisplayName acc
   , "created_at" .= accountCreatedAt acc
+  ]
+
+-- Convert tenant to JSON object
+tenantToJson :: Tenant -> Data.Aeson.Value
+tenantToJson t = object
+  [ "id" .= tenantId t
+  , "name" .= tenantName t
   ]

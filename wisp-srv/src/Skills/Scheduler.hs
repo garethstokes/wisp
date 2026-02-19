@@ -16,12 +16,13 @@ module Skills.Scheduler
 import Control.Exception (try, SomeException)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Reader (asks)
-import Data.Aeson (FromJSON(..), ToJSON(..), Value(..), decode, object, withObject, (.:), (.:?), (.=))
+import Data.Aeson (FromJSON(..), ToJSON(..), Value(..), decode, encode, object, withObject, (.:), (.:?), (.=))
 import qualified Data.ByteString.Lazy as BL
+import Data.List (find)
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text.Encoding (encodeUtf8)
+import Data.Text.Encoding (encodeUtf8, decodeUtf8)
 import Data.Time (UTCTime, getCurrentTime, addUTCTime, nominalDay, diffUTCTime)
 import qualified Data.Time.Format as TF
 import Data.Time.Zones (TZ, loadSystemTZ, utcToLocalTimeTZ)
@@ -30,6 +31,9 @@ import App.Config (Config(..), ClaudeConfig(..))
 import Domain.Activity (Activity(..))
 import Domain.Id (unEntityId)
 import Infra.Db.Activity (getTodaysCalendarEvents, getUpcomingCalendarEvents, insertConversation)
+import Infra.Db.Account (getAllAccounts)
+import Infra.Db.Auth (getAllTokens, tokenNeedsRefresh, AuthToken(..))
+import Domain.Account (Account(..), accountIdentifier)
 import Infra.Claude.Client (callClaudeWithSystem)
 import Agents.Run (RunContext(..), callClaudeLogged, logToolRequest, logToolSuccess, logToolFailure)
 import Domain.Agent (AgentInfo(..), ToolInfo(..), ToolType(..))
@@ -54,6 +58,7 @@ loadTimezone tzName = do
 data SchedulerToolCall
   = QueryCalendar CalendarQuery
   | FindFreeSlots FreeSlotQuery
+  | ListConnectedAccounts
   deriving (Show, Eq)
 
 data CalendarQuery = CalendarQuery
@@ -73,6 +78,12 @@ data ToolResult
   | ToolError Text
   deriving (Show, Eq)
 
+-- | A tool call paired with its execution result (for feeding back to LLM)
+data ExecutedTool = ExecutedTool
+  { executedCall :: SchedulerToolCall
+  , executedResult :: ToolResult
+  } deriving (Show, Eq)
+
 --------------------------------------------------------------------------------
 -- JSON Instances
 --------------------------------------------------------------------------------
@@ -83,6 +94,7 @@ instance FromJSON SchedulerToolCall where
     case (tool :: Text) of
       "query_calendar" -> QueryCalendar <$> parseJSON (Object v)
       "find_free_slots" -> FindFreeSlots <$> parseJSON (Object v)
+      "list_connected_accounts" -> pure ListConnectedAccounts
       _ -> fail $ "Unknown tool: " <> T.unpack tool
 
 instance FromJSON CalendarQuery where
@@ -113,6 +125,9 @@ instance ToJSON SchedulerToolCall where
     , "duration_minutes" .= slotDuration q
     , "start_hour" .= slotStartHour q
     , "end_hour" .= slotEndHour q
+    ]
+  toJSON ListConnectedAccounts = object
+    [ "tool" .= ("list_connected_accounts" :: Text)
     ]
 
 instance ToJSON CalendarQuery where
@@ -161,6 +176,35 @@ executeToolCall mTz (FindFreeSlots q) = do
         , "work_hours" .= (show startH <> ":00-" <> show endH <> ":00")
         ]
     ]
+
+executeToolCall _ ListConnectedAccounts = do
+  accounts <- getAllAccounts
+  tokens <- getAllTokens "google"
+
+  -- Build account info with connection status
+  accountInfos <- liftIO $ mapM (buildAccountInfo tokens) accounts
+
+  pure $ ToolSuccess $ object
+    [ "accounts" .= accountInfos
+    , "count" .= length accounts
+    , "provider" .= ("google" :: Text)
+    ]
+  where
+    buildAccountInfo :: [AuthToken] -> Account -> IO Value
+    buildAccountInfo tokens acc = do
+      let accId = accountId acc
+      let mToken = find (\t -> tokenAccountId t == accId) tokens
+      status <- case mToken of
+        Nothing -> pure ("disconnected" :: Text)
+        Just tok -> do
+          needsRefresh <- tokenNeedsRefresh tok
+          pure $ if needsRefresh then "token_expiring" else "connected"
+      pure $ object
+        [ "email" .= accountIdentifier acc
+        , "display_name" .= accountDisplayName acc
+        , "status" .= status
+        , "scopes" .= maybe ([] :: [Text]) tokenScopes mToken
+        ]
 
 eventToJson :: Maybe TZ -> Activity -> Value
 eventToJson mTz a = object
@@ -220,13 +264,13 @@ findFreeSlots mTz baseTime days startHour endHour durationMins events =
 
 data LLMResponse = LLMResponse
   { llmMessage :: Text
-  , llmToolCall :: Maybe SchedulerToolCall
+  , llmTools :: [SchedulerToolCall]
   } deriving (Show, Eq)
 
 instance FromJSON LLMResponse where
   parseJSON = withObject "LLMResponse" $ \v -> LLMResponse
-    <$> v .: "message"
-    <*> v .:? "tool_call"
+    <$> v .: "msg"
+    <*> (fromMaybe [] <$> v .:? "tools")
 
 handleChat :: [ChatMessage] -> Maybe Text -> App (Either Text ChatResponse)
 handleChat messages mTzName = do
@@ -245,29 +289,57 @@ handleChat messages mTzName = do
       upcomingEvents <- getUpcomingCalendarEvents 7
 
       let systemPrompt = buildChatPrompt mTz todayEvents upcomingEvents
-      let conversationPrompt = buildConversationPrompt messages
 
+      -- Run the agentic loop
       claudeCfg <- asks (claude . config)
-      result <- liftIO $ callClaudeWithSystem
-        (apiKey claudeCfg)
-        (model claudeCfg)
-        systemPrompt
-        conversationPrompt
+      runAgentLoop claudeCfg systemPrompt mTz messages [] query
 
-      case result of
+-- | Agentic loop: call LLM, execute tools, feed results back, repeat until done
+runAgentLoop
+  :: ClaudeConfig
+  -> Text                    -- System prompt
+  -> Maybe TZ                -- Timezone
+  -> [ChatMessage]           -- Original conversation
+  -> [ExecutedTool]          -- Accumulated tool results from this turn
+  -> Text                    -- Original query (for logging)
+  -> App (Either Text ChatResponse)
+runAgentLoop claudeCfg systemPrompt mTz messages prevTools query = do
+  let conversationPrompt = buildConversationWithTools messages prevTools
+
+  result <- liftIO $ callClaudeWithSystem
+    (apiKey claudeCfg)
+    (model claudeCfg)
+    systemPrompt
+    conversationPrompt
+
+  case result of
+    Left err -> pure $ Left err
+    Right (response, _, _) -> do
+      -- Log conversation on final response only
+      case parseLLMResponse response of
         Left err -> pure $ Left err
-        Right (response, _, _) -> do
-          _ <- insertConversation query response
-          case parseLLMResponse response of
-            Left err -> pure $ Left err
-            Right llmResp -> do
-              case llmToolCall llmResp of
-                Nothing -> pure $ Right $ Chat.ChatResponse (llmMessage llmResp) Nothing
-                Just toolCall -> do
-                  toolResult <- executeToolCall mTz toolCall
-                  case toolResult of
-                    ToolSuccess _ -> pure $ Right $ Chat.ChatResponse (llmMessage llmResp) Nothing
-                    ToolError err -> pure $ Left err
+        Right llmResp -> do
+          case llmTools llmResp of
+            [] -> do
+              -- No more tools - we're done, log and return
+              _ <- insertConversation query response
+              pure $ Right $ Chat.ChatResponse (llmMessage llmResp) Nothing
+            toolCalls -> do
+              -- Execute all tools
+              executedTools <- mapM (executeAndWrap mTz) toolCalls
+              -- Check for any errors
+              let errors = [err | ExecutedTool _ (ToolError err) <- executedTools]
+              case errors of
+                (err:_) -> pure $ Left err
+                [] -> do
+                  -- Continue the loop with tool results
+                  runAgentLoop claudeCfg systemPrompt mTz messages executedTools query
+
+-- | Execute a tool and wrap with its call for feedback
+executeAndWrap :: Maybe TZ -> SchedulerToolCall -> App ExecutedTool
+executeAndWrap mTz call = do
+  result <- executeToolCall mTz call
+  pure $ ExecutedTool call result
 
 -- | Handle chat with run context for event logging
 handleChatWithContext :: RunContext -> [ChatMessage] -> Maybe Text -> App (Either Text ChatResponse)
@@ -285,42 +357,60 @@ handleChatWithContext ctx messages mTzName = do
       upcomingEvents <- getUpcomingCalendarEvents 7
 
       let systemPrompt = buildChatPrompt mTz todayEvents upcomingEvents
-      let conversationPrompt = buildConversationPrompt messages
 
-      -- Call Claude with logging
-      result <- callClaudeLogged ctx systemPrompt conversationPrompt
+      -- Run the agentic loop with logging
+      runAgentLoopLogged ctx systemPrompt mTz messages []
 
-      case result of
-        Left err -> pure $ Left err
-        Right response -> do
-          case parseLLMResponse response of
-            Left err -> pure $ Left err
-            Right llmResp -> do
-              case llmToolCall llmResp of
-                Nothing -> pure $ Right $ Chat.ChatResponse (llmMessage llmResp) Nothing
-                Just toolCall -> do
-                  toolResult <- executeToolCallLogged ctx mTz toolCall
-                  case toolResult of
-                    ToolSuccess _ -> pure $ Right $ Chat.ChatResponse (llmMessage llmResp) Nothing
-                    ToolError err -> pure $ Left err
+-- | Agentic loop with RunContext logging
+runAgentLoopLogged
+  :: RunContext
+  -> Text                    -- System prompt
+  -> Maybe TZ                -- Timezone
+  -> [ChatMessage]           -- Original conversation
+  -> [ExecutedTool]          -- Accumulated tool results from this turn
+  -> App (Either Text ChatResponse)
+runAgentLoopLogged ctx systemPrompt mTz messages prevTools = do
+  let conversationPrompt = buildConversationWithTools messages prevTools
 
--- | Execute tool call with logging
-executeToolCallLogged :: RunContext -> Maybe TZ -> SchedulerToolCall -> App ToolResult
-executeToolCallLogged ctx mTz toolCall = do
-  let toolName = case toolCall of
-        QueryCalendar {} -> "query_calendar"
-        FindFreeSlots {} -> "find_free_slots"
-
-  _ <- logToolRequest ctx toolName (toJSON toolCall)
-  result <- executeToolCall mTz toolCall
+  result <- callClaudeLogged ctx systemPrompt conversationPrompt
 
   case result of
-    ToolSuccess val -> do
-      logToolSuccess ctx toolName val
-      pure result
-    ToolError err -> do
-      logToolFailure ctx toolName err
-      pure result
+    Left err -> pure $ Left err
+    Right response -> do
+      case parseLLMResponse response of
+        Left err -> pure $ Left err
+        Right llmResp -> do
+          case llmTools llmResp of
+            [] -> do
+              -- No more tools - we're done
+              pure $ Right $ Chat.ChatResponse (llmMessage llmResp) Nothing
+            toolCalls -> do
+              -- Execute all tools with logging
+              executedTools <- mapM (executeAndWrapLogged ctx mTz) toolCalls
+              -- Check for any errors
+              let errors = [err | ExecutedTool _ (ToolError err) <- executedTools]
+              case errors of
+                (err:_) -> pure $ Left err
+                [] -> do
+                  -- Continue the loop with tool results
+                  runAgentLoopLogged ctx systemPrompt mTz messages executedTools
+
+-- | Execute a tool with logging and wrap with its call for feedback
+executeAndWrapLogged :: RunContext -> Maybe TZ -> SchedulerToolCall -> App ExecutedTool
+executeAndWrapLogged ctx mTz call = do
+  let toolName = case call of
+        QueryCalendar {} -> "query_calendar"
+        FindFreeSlots {} -> "find_free_slots"
+        ListConnectedAccounts -> "list_connected_accounts"
+
+  _ <- logToolRequest ctx toolName (toJSON call)
+  result <- executeToolCall mTz call
+
+  case result of
+    ToolSuccess val -> logToolSuccess ctx toolName val
+    ToolError err -> logToolFailure ctx toolName err
+
+  pure $ ExecutedTool call result
 
 buildConversationPrompt :: [ChatMessage] -> Text
 buildConversationPrompt msgs = T.unlines
@@ -333,6 +423,31 @@ buildConversationPrompt msgs = T.unlines
           r -> r
   ]
 
+-- | Build conversation including tool results from current turn
+buildConversationWithTools :: [ChatMessage] -> [ExecutedTool] -> Text
+buildConversationWithTools msgs executedTools =
+  let baseConvo = buildConversationPrompt msgs
+      toolSection = case executedTools of
+        [] -> ""
+        tools -> T.unlines $
+          [ ""
+          , "## Tool Results"
+          , "You called these tools. Here are the results:"
+          , ""
+          ] ++ map formatExecutedTool tools
+  in baseConvo <> toolSection
+
+formatExecutedTool :: ExecutedTool -> Text
+formatExecutedTool (ExecutedTool call result) =
+  let toolName = case call of
+        QueryCalendar {} -> "query_calendar"
+        FindFreeSlots {} -> "find_free_slots"
+        ListConnectedAccounts -> "list_connected_accounts"
+      resultJson = case result of
+        ToolSuccess val -> decodeUtf8 $ BL.toStrict $ encode val
+        ToolError err -> "{\"error\": \"" <> err <> "\"}"
+  in "### " <> toolName <> "\n" <> resultJson
+
 buildChatPrompt :: Maybe TZ -> [Activity] -> [Activity] -> Text
 buildChatPrompt mTz todayEvents upcomingEvents = T.unlines
   [ "You are Wisp's scheduler agent. You help with calendar questions and finding time."
@@ -340,24 +455,27 @@ buildChatPrompt mTz todayEvents upcomingEvents = T.unlines
   , "## Response Format"
   , "IMPORTANT: Respond with ONLY valid JSON, no other text."
   , ""
-  , "{\"message\": \"Your response\", \"tool_call\": null}"
+  , "Response without tools:"
+  , "{\"msg\": \"Your response to the user\"}"
   , ""
-  , "Or with a tool call:"
+  , "Response with tools (you can call multiple):"
+  , "{\"msg\": \"What you're doing\", \"tools\": [{\"tool\": \"...\", ...}, ...]}"
   , ""
-  , "{\"message\": \"Your response\", \"tool_call\": {\"tool\": \"...\", ...}}"
+  , "After tool results are returned, you'll see them and can respond or call more tools."
+  , "When done, respond with just msg (no tools array)."
   , ""
   , "## Available Tools"
   , ""
   , "### query_calendar - Get calendar events"
-  , "```json"
   , "{\"tool\": \"query_calendar\", \"days\": 7}"
   , "{\"tool\": \"query_calendar\", \"date\": \"2026-02-05\"}"
-  , "```"
   , ""
   , "### find_free_slots - Find available time"
-  , "```json"
   , "{\"tool\": \"find_free_slots\", \"days\": 7, \"duration_minutes\": 60, \"start_hour\": 9, \"end_hour\": 17}"
-  , "```"
+  , ""
+  , "### list_connected_accounts - Show which accounts provide calendar data"
+  , "{\"tool\": \"list_connected_accounts\"}"
+  , "Returns email, connection status, and granted scopes for each account."
   , ""
   , "## Style"
   , "- Present schedule information naturally, not as a raw list"
@@ -437,6 +555,7 @@ agentInfo = AgentInfo
   , agentTools =
       [ ToolInfo "query_calendar" Decision
       , ToolInfo "find_free_slots" Decision
+      , ToolInfo "list_connected_accounts" Decision
       ]
   , agentWorkflows = ["schedule-query", "find-time"]
   , agentImplemented = True

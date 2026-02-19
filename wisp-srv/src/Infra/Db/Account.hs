@@ -6,34 +6,46 @@ module Infra.Db.Account
   ) where
 
 import Control.Monad.IO.Class (liftIO)
+import Data.Aeson (Value)
 import Data.Text (Text)
+import qualified Data.Text as T
 import Database.PostgreSQL.Simple
-import Database.PostgreSQL.Simple.FromRow
+import Database.PostgreSQL.Simple.FromRow (FromRow(..), fieldWith, field)
+import Database.PostgreSQL.Simple.FromField (fromField, returnError, ResultError(..), Conversion)
 import Domain.Id (EntityId(..), newEntityId)
-import Domain.Account (Account(..))
+import Domain.Account (Account(..), AccountProvider(..))
 import App.Monad (App, getConn)
 
 instance FromRow Account where
   fromRow = Account
     <$> (EntityId <$> field)  -- id
-    <*> field                  -- email
-    <*> field                  -- display_name
-    <*> field                  -- created_at
+    <*> providerField         -- provider (text -> AccountProvider)
+    <*> field                 -- display_name
+    <*> field                 -- details (jsonb)
+    <*> field                 -- created_at
+    where
+      providerField = fieldWith $ \f mbs -> do
+        txt <- fromField f mbs :: Conversion Text
+        case txt of
+          "google" -> pure Google
+          "github" -> pure GitHub
+          other    -> returnError ConversionFailed f $ "Unknown provider: " <> T.unpack other
 
 -- Upsert account by email, returns the account (existing or new)
+-- NOTE: This function signature will be updated in Task 4 to support multi-provider
 upsertAccount :: Text -> Maybe Text -> App Account
 upsertAccount email displayName = do
   conn <- getConn
   aid <- liftIO newEntityId
   _ <- liftIO $ execute conn
-    "insert into accounts (id, email, display_name) \
-    \values (?, ?, ?) \
-    \on conflict (email) do update set \
+    "insert into accounts (id, provider, display_name, details) \
+    \values (?, 'google', ?, ?::jsonb) \
+    \on conflict (provider, (details->>'email')) do update set \
     \  display_name = coalesce(excluded.display_name, accounts.display_name)"
-    (unEntityId aid, email, displayName)
+    (unEntityId aid, displayName, "{\"email\":\"" <> email <> "\"}")
   -- Fetch the account (might be existing or newly created)
   results <- liftIO $ query conn
-    "select id, email, display_name, created_at from accounts where email = ?"
+    "select id, provider, display_name, details, created_at from accounts where details->>'email' = ?"
     (Only email)
   case results of
     [acc] -> pure acc
@@ -44,14 +56,14 @@ getAllAccounts :: App [Account]
 getAllAccounts = do
   conn <- getConn
   liftIO $ query_ conn
-    "select id, email, display_name, created_at from accounts order by created_at"
+    "select id, provider, display_name, details, created_at from accounts order by created_at"
 
 -- Get account by email
 getAccountByEmail :: Text -> App (Maybe Account)
 getAccountByEmail email = do
   conn <- getConn
   results <- liftIO $ query conn
-    "select id, email, display_name, created_at from accounts where email = ?"
+    "select id, provider, display_name, details, created_at from accounts where details->>'email' = ?"
     (Only email)
   pure $ case results of
     [acc] -> Just acc
@@ -62,7 +74,7 @@ getAccountById :: EntityId -> App (Maybe Account)
 getAccountById aid = do
   conn <- getConn
   results <- liftIO $ query conn
-    "select id, email, display_name, created_at from accounts where id = ?"
+    "select id, provider, display_name, details, created_at from accounts where id = ?"
     (Only $ unEntityId aid)
   pure $ case results of
     [acc] -> Just acc

@@ -16,7 +16,7 @@ import Data.Time.Format.ISO8601 (iso8601ParseM)
 
 import App.Monad (App)
 import Domain.Id (EntityId)
-import Domain.Account (Account(..))
+import Domain.Account (Account(..), accountIdentifier)
 import Domain.Activity (NewActivity(..), ActivitySource(..))
 import Infra.Db.Activity (insertActivity, activityExistsForAccount)
 import Infra.Db.PollState (getPollStateForAccount, updatePollStateForAccount, ensurePollStateExists, PollState(..))
@@ -38,7 +38,7 @@ pollAllCalendar = do
       Left NoToken -> pure $ Left "No token"
       Left (RefreshFailed err) -> pure $ Left $ "Token refresh failed: " <> err
       Right token -> pollCalendarWithToken (accountId acc) token
-    pure (accountEmail acc, result)
+    pure (fromMaybe "<unknown>" (accountIdentifier acc), result)
 
 -- | Poll Calendar for a specific account
 pollCalendarForAccount :: Account -> App (Either Text [EntityId])
