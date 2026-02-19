@@ -19,6 +19,13 @@ spec = describe "Activity" $ do
     it "parses note from JSON" $ do
       decode "\"note\"" `shouldBe` Just Note
 
+    it "serializes GitHubEvent to JSON" $ do
+      let json = encode GitHubEvent
+      json `shouldBe` "\"github_event\""
+
+    it "parses GitHubEvent from JSON" $ do
+      decode "\"github_event\"" `shouldBe` Just GitHubEvent
+
   describe "ActivityStatus" $ do
     it "round-trips through JSON" $ do
       decode (encode Pending) `shouldBe` Just Pending

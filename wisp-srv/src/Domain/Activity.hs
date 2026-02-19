@@ -15,7 +15,7 @@ import Data.Time (UTCTime)
 import Domain.Id (EntityId, unEntityId)
 import GHC.Generics (Generic)
 
-data ActivitySource = Email | Calendar | Conversation | Note
+data ActivitySource = Email | Calendar | Conversation | Note | GitHubEvent
   deriving (Eq, Show, Generic)
 
 instance ToJSON ActivitySource where
@@ -23,6 +23,7 @@ instance ToJSON ActivitySource where
   toJSON Calendar = "calendar"
   toJSON Conversation = "conversation"
   toJSON Note = "note"
+  toJSON GitHubEvent = "github_event"
 
 instance FromJSON ActivitySource where
   parseJSON = withText "ActivitySource" $ \case
@@ -30,6 +31,7 @@ instance FromJSON ActivitySource where
     "calendar" -> pure Calendar
     "conversation" -> pure Conversation
     "note" -> pure Note
+    "github_event" -> pure GitHubEvent
     _ -> fail "Invalid activity source"
 
 data ActivityStatus
