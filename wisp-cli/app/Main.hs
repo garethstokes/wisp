@@ -1624,18 +1624,172 @@ showTenantDetail tenant = do
 --------------------------------------------------------------------------------
 
 runProject :: ProjectCommand -> IO ()
-runProject _ = putStrLn "Project commands not yet implemented"
+runProject ProjectList = do
+  manager <- newManager defaultManagerSettings
+  req <- parseRequest $ baseUrl <> "/api/projects"
+  response <- httpLbs req manager
+  case decode (responseBody response) of
+    Just val -> case val of
+      Object obj -> case KM.lookup "projects" obj of
+        Just (Array projects) -> do
+          TIO.putStrLn "Active Projects"
+          TIO.putStrLn "==============="
+          if null projects
+            then TIO.putStrLn "No projects found."
+            else mapM_ showProject (toList projects)
+        _ -> TIO.putStrLn "No projects found"
+      _ -> TIO.putStrLn "Failed to parse projects"
+    _ -> TIO.putStrLn "Failed to fetch projects"
+
+runProject (ProjectCreate name projType) = do
+  manager <- newManager defaultManagerSettings
+  initialReq <- parseRequest $ baseUrl <> "/api/projects"
+  let reqBody = object ["name" .= name, "type" .= projType]
+  let req = initialReq
+        { method = "POST"
+        , requestHeaders = [("Content-Type", "application/json")]
+        , requestBody = RequestBodyLBS (encode reqBody)
+        }
+  response <- httpLbs req manager
+  case decode (responseBody response) of
+    Just val -> case val of
+      Object obj -> case KM.lookup "id" obj of
+        Just (String pid) -> TIO.putStrLn $ "Created project: " <> pid
+        _ -> TIO.putStrLn "Project created"
+      _ -> TIO.putStrLn "Project created"
+    _ -> TIO.putStrLn "Failed to create project"
+
+runProject (ProjectArchive pid) = do
+  manager <- newManager defaultManagerSettings
+  initialReq <- parseRequest $ baseUrl <> "/api/projects/" <> unpack pid <> "/archive"
+  let req = initialReq { method = "POST" }
+  _ <- httpLbs req manager
+  TIO.putStrLn $ "Archived project: " <> pid
+
+showProject :: Value -> IO ()
+showProject (Object p) = do
+  let getId = case KM.lookup "id" p of
+        Just (String s) -> s
+        _ -> "?"
+  let getData = KM.lookup "data" p
+  let name = case getData of
+        Just (Object d) -> case KM.lookup "name" d of
+          Just (String n) -> n
+          _ -> "?"
+        _ -> "?"
+  let ptype = case getData of
+        Just (Object d) -> case KM.lookup "type" d of
+          Just (String t) -> t
+          _ -> "?"
+        _ -> "?"
+  TIO.putStrLn $ "  [" <> T.take 8 getId <> "] " <> name <> " (" <> ptype <> ")"
+showProject _ = pure ()
 
 --------------------------------------------------------------------------------
 -- Note Commands
 --------------------------------------------------------------------------------
 
 runNote :: NoteCommand -> IO ()
-runNote _ = putStrLn "Note commands not yet implemented"
+runNote (NoteList _mTag) = do
+  manager <- newManager defaultManagerSettings
+  req <- parseRequest $ baseUrl <> "/api/notes"
+  response <- httpLbs req manager
+  case decode (responseBody response) of
+    Just val -> case val of
+      Object obj -> case KM.lookup "notes" obj of
+        Just (Array notes) -> do
+          TIO.putStrLn "Notes"
+          TIO.putStrLn "====="
+          if null notes
+            then TIO.putStrLn "No notes found."
+            else mapM_ showNote (toList notes)
+        _ -> TIO.putStrLn "No notes found"
+      _ -> TIO.putStrLn "Failed to parse notes"
+    _ -> TIO.putStrLn "Failed to fetch notes"
+
+runNote (NoteCreate title mContent tags) = do
+  manager <- newManager defaultManagerSettings
+  initialReq <- parseRequest $ baseUrl <> "/api/notes"
+  let reqBody = object $
+        [ "title" .= title ]
+        <> maybe [] (\c -> ["content" .= c]) mContent
+        <> if null tags then [] else ["tags" .= tags]
+  let req = initialReq
+        { method = "POST"
+        , requestHeaders = [("Content-Type", "application/json")]
+        , requestBody = RequestBodyLBS (encode reqBody)
+        }
+  response <- httpLbs req manager
+  case decode (responseBody response) of
+    Just val -> case val of
+      Object obj -> case KM.lookup "id" obj of
+        Just (String nid) -> TIO.putStrLn $ "Created note: " <> nid
+        _ -> TIO.putStrLn "Note created"
+      _ -> TIO.putStrLn "Note created"
+    _ -> TIO.putStrLn "Failed to create note"
+
+showNote :: Value -> IO ()
+showNote (Object n) = do
+  let getId = case KM.lookup "id" n of
+        Just (String s) -> T.take 8 s
+        _ -> "?"
+  let getData = KM.lookup "data" n
+  let title = case getData of
+        Just (Object d) -> case KM.lookup "title" d of
+          Just (String t) -> t
+          _ -> "?"
+        _ -> "?"
+  TIO.putStrLn $ "  [" <> getId <> "] " <> title
+showNote _ = pure ()
 
 --------------------------------------------------------------------------------
 -- Pref Commands
 --------------------------------------------------------------------------------
 
 runPref :: PrefCommand -> IO ()
-runPref _ = putStrLn "Pref commands not yet implemented"
+runPref PrefList = do
+  manager <- newManager defaultManagerSettings
+  req <- parseRequest $ baseUrl <> "/api/preferences"
+  response <- httpLbs req manager
+  case decode (responseBody response) of
+    Just val -> case val of
+      Object obj -> case KM.lookup "preferences" obj of
+        Just (Array prefList) -> do
+          TIO.putStrLn "Preferences"
+          TIO.putStrLn "==========="
+          if null prefList
+            then TIO.putStrLn "No preferences set."
+            else mapM_ showPref (toList prefList)
+        _ -> TIO.putStrLn "No preferences found"
+      _ -> TIO.putStrLn "Failed to parse preferences"
+    _ -> TIO.putStrLn "Failed to fetch preferences"
+
+runPref (PrefSet prefKey prefValue mContext) = do
+  manager <- newManager defaultManagerSettings
+  initialReq <- parseRequest $ baseUrl <> "/api/preferences"
+  let reqBody = object $
+        [ "key" .= prefKey, "value" .= prefValue ]
+        <> maybe [] (\c -> ["context" .= c]) mContext
+  let req = initialReq
+        { method = "POST"
+        , requestHeaders = [("Content-Type", "application/json")]
+        , requestBody = RequestBodyLBS (encode reqBody)
+        }
+  _ <- httpLbs req manager
+  TIO.putStrLn $ "Set preference: " <> prefKey <> " = " <> prefValue
+
+showPref :: Value -> IO ()
+showPref (Object p) = do
+  let getData = KM.lookup "data" p
+  let prefKey = case getData of
+        Just (Object d) -> case KM.lookup "key" d of
+          Just (String k) -> k
+          _ -> "?"
+        _ -> "?"
+  let prefValue = case getData of
+        Just (Object d) -> case KM.lookup "value" d of
+          Just (String v) -> v
+          _ -> "?"
+        _ -> "?"
+  TIO.putStrLn $ "  " <> prefKey <> " = " <> prefValue
+showPref _ = pure ()
