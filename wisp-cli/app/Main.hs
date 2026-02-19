@@ -6,6 +6,7 @@ import Control.Monad (forM_, when)
 import Data.Aeson (FromJSON (..), ToJSON (..), Value (..), decode, encode, object, withObject, (.:), (.:?), (.=))
 import Data.Aeson.KeyMap qualified as KM
 import Data.ByteString.Lazy qualified as BL
+import Data.Text.Encoding (decodeUtf8)
 import Data.Foldable (toList)
 import Data.List (isSuffixOf)
 import Data.String (fromString)
@@ -24,8 +25,11 @@ import Config (CliConfig (..), loadCliConfig)
 import Time (TZ, loadTimezone, utcToLocal)
 
 -- CLI Command types
+data AuthProvider = AuthGoogle | AuthGitHub
+  deriving (Show)
+
 data Command
-  = Auth
+  = Auth AuthProvider
   | Status
   | Poll
   | Classify
@@ -41,10 +45,17 @@ data Command
   | Skills (Maybe Text)           -- List skills or show one
   | Activate Text Text            -- agent skill
   | Deactivate Text               -- agent
+  | Tenant TenantCommand          -- Tenant management
   | Sessions SessionsOptions
   | Runs
   | Run Text
   | Help
+  deriving (Show)
+
+data TenantCommand
+  = TenantList
+  | TenantCreate Text             -- name
+  | TenantShow Text               -- id
   deriving (Show)
 
 data ChatOptions = ChatOptions
@@ -76,11 +87,12 @@ commandParser =
         <> command "skills" (info skillsParser (progDesc "List skills or show skill details"))
         <> command "activate" (info activateParser (progDesc "Activate a skill for an agent"))
         <> command "deactivate" (info deactivateParser (progDesc "Deactivate current skill for an agent"))
+        <> command "tenant" (info tenantParser (progDesc "Manage tenants"))
         <> command "sessions" (info sessionsParser (progDesc "Manage chat sessions"))
         <> command "people" (info (pure People) (progDesc "List contacts extracted from activities"))
         <> command "poll" (info (pure Poll) (progDesc "Fetch new emails and calendar events now"))
         <> command "classify" (info (pure Classify) (progDesc "Run classification on pending activities"))
-        <> command "auth" (info (pure Auth) (progDesc "Add a Google account via OAuth"))
+        <> command "auth" (info authParser (progDesc "Add an account via OAuth (google or github)"))
         <> command "runs" (info (pure Runs) (progDesc "List recent agent runs"))
         <> command "run" (info runParser (progDesc "Show full details for an agent run"))
         <> command "help" (info (pure Help) (progDesc "Show this help"))
@@ -131,6 +143,25 @@ activateParser = Activate
 
 deactivateParser :: Parser Command
 deactivateParser = Deactivate <$> strArgument (metavar "AGENT" <> help "Agent name")
+
+tenantParser :: Parser Command
+tenantParser = Tenant <$> subparser
+  ( command "list" (info (pure TenantList) (progDesc "List all tenants"))
+  <> command "create" (info tenantCreateParser (progDesc "Create a new tenant"))
+  <> command "show" (info tenantShowParser (progDesc "Show tenant details"))
+  )
+
+tenantCreateParser :: Parser TenantCommand
+tenantCreateParser = TenantCreate <$> strArgument (metavar "NAME" <> help "Tenant name")
+
+tenantShowParser :: Parser TenantCommand
+tenantShowParser = TenantShow <$> strArgument (metavar "ID" <> help "Tenant UUID")
+
+authParser :: Parser Command
+authParser = Auth <$> subparser
+  ( command "google" (info (pure AuthGoogle) (progDesc "Add a Google account via OAuth"))
+  <> command "github" (info (pure AuthGitHub) (progDesc "Add a GitHub account via OAuth"))
+  )
 
 -- Parser that defaults to Help when no command given
 commandParserWithDefault :: Parser Command
@@ -234,7 +265,7 @@ main = do
   cfg <- loadCliConfig
   tz <- loadTimezone (timezone cfg)
   case cmd of
-    Auth -> runAuth
+    Auth provider -> runAuth provider
     Status -> runStatus
     Poll -> runPoll
     Classify -> runClassify
@@ -250,6 +281,7 @@ main = do
     Skills mName -> runSkills mName
     Activate agent skill -> runActivate agent skill
     Deactivate agent -> runDeactivate agent
+    Tenant tenantCmd -> runTenant tenantCmd
     Sessions sessOpts -> runSessions sessOpts
     Runs -> runRuns tz
     Run rid -> runRun tz rid
@@ -278,12 +310,16 @@ runHelp = do
   TIO.putStrLn "  skills NAME         Show skill details and prompt"
   TIO.putStrLn "  activate AGENT SKILL  Activate a skill for an agent"
   TIO.putStrLn "  deactivate AGENT    Deactivate current skill for agent"
+  TIO.putStrLn "  tenant list         List all tenants"
+  TIO.putStrLn "  tenant create NAME  Create a new tenant"
+  TIO.putStrLn "  tenant show ID      Show tenant details"
   TIO.putStrLn "  sessions            List chat sessions"
   TIO.putStrLn "    -d, --delete      Delete a session"
   TIO.putStrLn "  people              List contacts from activities"
   TIO.putStrLn "  poll                Fetch new emails and events now"
   TIO.putStrLn "  classify            Run classification on pending activities"
-  TIO.putStrLn "  auth                Add a Google account via OAuth"
+  TIO.putStrLn "  auth google         Add a Google account via OAuth"
+  TIO.putStrLn "  auth github         Add a GitHub account via OAuth"
   TIO.putStrLn "  runs                List recent agent runs"
   TIO.putStrLn "  run ID              Show full details for an agent run"
   TIO.putStrLn ""
@@ -994,8 +1030,8 @@ runPoll = do
       _ -> TIO.putStrLn "Poll triggered"
     _ -> TIO.putStrLn "Poll request sent"
 
-runAuth :: IO ()
-runAuth = do
+runAuth :: AuthProvider -> IO ()
+runAuth provider = do
   manager <- newManager defaultManagerSettings
 
   -- Show current account count
@@ -1004,9 +1040,13 @@ runAuth = do
     TIO.putStrLn $ "Currently have " <> showT currentCount <> " account(s) connected."
     TIO.putStrLn "Adding another account..."
 
+  let (providerName, authPath) = case provider of
+        AuthGoogle -> ("Google", "/auth/google")
+        AuthGitHub -> ("GitHub", "/auth/github")
+
   TIO.putStrLn "Starting OAuth flow..."
-  TIO.putStrLn "Opening browser for Google authentication..."
-  let authUrl = baseUrl <> "/auth/google"
+  TIO.putStrLn $ "Opening browser for " <> providerName <> " authentication..."
+  let authUrl = baseUrl <> authPath
   -- Open browser (cross-platform)
   callCommand $ "xdg-open '" <> authUrl <> "' 2>/dev/null || open '" <> authUrl <> "' 2>/dev/null || start '' '" <> authUrl <> "'"
   TIO.putStrLn "\nWaiting for authentication..."
@@ -1046,11 +1086,26 @@ runStatus = do
     Just _ -> TIO.putStrLn "Server:     online"
     Nothing -> TIO.putStrLn "Server:     offline"
 
-  -- Check auth status (show connected accounts)
+  -- Check auth status (show connected accounts and tenant)
   authReq <- parseRequest $ baseUrl <> "/auth/status"
   authResp <- httpLbs authReq manager
   case decode (responseBody authResp) of
     Just (Object obj) -> do
+      -- Show tenant first
+      case KM.lookup "tenant" obj of
+        Just (Object tenant) -> do
+          let getName = case KM.lookup "name" tenant of
+                Just (String s) -> s
+                _ -> "?"
+          let getId = case KM.lookup "id" tenant of
+                Just (String s) -> s
+                _ -> ""
+          TIO.putStrLn $ "Tenant:     " <> getName
+          TIO.putStrLn $ "            " <> getId
+        Just Null -> TIO.putStrLn "Tenant:     none (run: wisp tenant create <name>)"
+        Nothing -> TIO.putStrLn "Tenant:     none (run: wisp tenant create <name>)"
+        _ -> return ()
+      -- Show accounts
       case KM.lookup "count" obj of
         Just (Number n) | n > 0 -> do
           TIO.putStrLn $ "Accounts:   " <> showT (round n :: Int) <> " connected"
@@ -1087,9 +1142,20 @@ showT = pack . show
 
 -- Show a single account from auth status
 showAccount :: Value -> IO ()
-showAccount (Object acc) = case KM.lookup "email" acc of
-  Just (String email) -> TIO.putStrLn $ "            - " <> email
-  _ -> return ()
+showAccount (Object acc) = do
+  let provider = case KM.lookup "provider" acc of
+        Just (String "Google") -> "google"
+        Just (String "GitHub") -> "github"
+        Just (String p) -> p
+        _ -> "?"
+  let identifier = case KM.lookup "identifier" acc of
+        Just (String i) -> i
+        Just Null -> "(unknown)"
+        _ -> "(unknown)"
+  let displayName = case KM.lookup "display_name" acc of
+        Just (String n) -> " (" <> n <> ")"
+        _ -> ""
+  TIO.putStrLn $ "            - [" <> provider <> "] " <> identifier <> displayName
 showAccount _ = return ()
 
 -- GET /runs - List recent agent runs
@@ -1120,6 +1186,10 @@ showRunBrief tz (Object run) = do
   let getAgent = case KM.lookup "agent" run of
         Just (String s) -> s
         _ -> "unknown"
+  let getSession = case KM.lookup "session_id" run of
+        Just (String s) -> s
+        Just Null -> "-"
+        _ -> "-"
   let getStatus = case KM.lookup "status" run of
         Just (String "running") -> "🔄"
         Just (String "waiting") -> "⏸️"
@@ -1129,7 +1199,7 @@ showRunBrief tz (Object run) = do
   let getCreated = case KM.lookup "created_at" run of
         Just (String s) -> formatDateLocal tz s
         _ -> ""
-  TIO.putStrLn $ "  " <> getStatus <> " " <> getCreated <> " [" <> getId <> "] " <> getAgent
+  TIO.putStrLn $ "  " <> getStatus <> " " <> getCreated <> " [" <> getId <> "] " <> getAgent <> " (session: " <> getSession <> ")"
 showRunBrief _ _ = return ()
 
 -- GET /runs/:id - Show full run with events
@@ -1149,10 +1219,10 @@ runRun tz rid = do
       showDateField tz "Created" "created_at" run
       showDateField tz "Updated" "updated_at" run
       TIO.putStrLn ""
-      TIO.putStrLn "Events:"
-      TIO.putStrLn "-------"
+      TIO.putStrLn "Conversation:"
+      TIO.putStrLn "============="
       case KM.lookup "events" run of
-        Just (Array events) | not (null events) -> mapM_ (showRunEvent tz) (toList events)
+        Just (Array events) | not (null events) -> showConversation tz (toList events)
         _ -> TIO.putStrLn "  No events"
     _ -> TIO.putStrLn "❌ Failed to fetch run (not found or error)"
 
@@ -1209,20 +1279,19 @@ showRunEvent tz (Object event) = do
       case KM.lookup "system_prompt" event of
         Just (String sp) -> do
           TIO.putStrLn "    System prompt:"
-          showWrappedText "      " sp 100
+          showFullText "      " sp
         _ -> return ()
 
       case KM.lookup "user_prompt" event of
         Just (String up) -> do
           TIO.putStrLn "    User prompt:"
-          showWrappedText "      " up 100
+          showFullText "      " up
         _ -> return ()
 
       case KM.lookup "raw_response" event of
         Just (String resp) -> do
           TIO.putStrLn "    Response:"
-          showWrappedText "      " resp 80
-          TIO.putStrLn $ "    (Response length: " <> showT (T.length resp) <> " chars)"
+          showFullText "      " resp
         _ -> return ()
 
     "tool_requested" -> do
@@ -1233,7 +1302,7 @@ showRunEvent tz (Object event) = do
       case KM.lookup "tool_args" event of
         Just v -> do
           TIO.putStrLn "    Arguments:"
-          TIO.putStrLn $ "      " <> pack (show v)
+          TIO.putStrLn $ "      " <> decodeUtf8 (BL.toStrict (encode v))
         _ -> return ()
 
     "tool_succeeded" -> do
@@ -1244,10 +1313,7 @@ showRunEvent tz (Object event) = do
       case KM.lookup "result" event of
         Just v -> do
           TIO.putStrLn "    Result:"
-          let resultStr = pack (show v)
-          if T.length resultStr > 500
-            then TIO.putStrLn $ "      " <> T.take 500 resultStr <> "... (truncated, " <> showT (T.length resultStr) <> " chars total)"
-            else TIO.putStrLn $ "      " <> resultStr
+          showFullText "      " (decodeUtf8 (BL.toStrict (encode v)))
         _ -> return ()
 
     "tool_failed" -> do
@@ -1278,3 +1344,196 @@ showWrappedText prefix text maxLines = do
   forM_ linesToShow $ \line -> TIO.putStrLn $ prefix <> line
   when (length textLines > maxLines) $
     TIO.putStrLn $ prefix <> "... (" <> showT (length textLines - maxLines) <> " more lines)"
+
+-- Helper to show full text without truncation
+showFullText :: Text -> Text -> IO ()
+showFullText prefix text = do
+  let textLines = T.lines text
+  forM_ textLines $ \line -> TIO.putStrLn $ prefix <> line
+
+-- | Show conversation in a clear sequential format
+showConversation :: TZ -> [Value] -> IO ()
+showConversation tz events = do
+  -- First show system prompt from the first llm_called event
+  case findFirstLlmCall events of
+    Just (Object ev) -> do
+      TIO.putStrLn ""
+      TIO.putStrLn "───── system prompt ─────"
+      case KM.lookup "system_prompt" ev of
+        Just (String sp) -> TIO.putStrLn sp
+        _ -> TIO.putStrLn "(none)"
+    _ -> return ()
+
+  -- Then show the conversation turns
+  TIO.putStrLn ""
+  mapM_ (showConversationEvent tz) events
+
+findFirstLlmCall :: [Value] -> Maybe Value
+findFirstLlmCall [] = Nothing
+findFirstLlmCall (v@(Object ev):rest) = case KM.lookup "type" ev of
+  Just (String "llm_called") -> Just v
+  _ -> findFirstLlmCall rest
+findFirstLlmCall (_:rest) = findFirstLlmCall rest
+
+showConversationEvent :: TZ -> Value -> IO ()
+showConversationEvent _tz (Object event) = do
+  let getType = case KM.lookup "type" event of
+        Just (String s) -> s
+        _ -> "unknown"
+
+  case getType of
+    "llm_called" -> do
+      -- Show user prompt (input to LLM)
+      TIO.putStrLn ""
+      TIO.putStrLn "───── user message ─────"
+      case KM.lookup "user_prompt" event of
+        Just (String up) -> TIO.putStrLn up
+        _ -> TIO.putStrLn "(none)"
+
+      -- Show LLM response
+      TIO.putStrLn ""
+      TIO.putStrLn "───── agent response ─────"
+      case KM.lookup "raw_response" event of
+        Just (String resp) -> TIO.putStrLn resp
+        _ -> TIO.putStrLn "(none)"
+
+      -- Show token usage
+      let inputTokens = case KM.lookup "input_tokens" event of
+            Just (Number n) -> Just (round n :: Int)
+            _ -> Nothing
+      let outputTokens = case KM.lookup "output_tokens" event of
+            Just (Number n) -> Just (round n :: Int)
+            _ -> Nothing
+      case (inputTokens, outputTokens) of
+        (Just inp, Just out) ->
+          TIO.putStrLn $ "[tokens: " <> showT inp <> " in, " <> showT out <> " out]"
+        _ -> return ()
+
+    "tool_requested" -> do
+      TIO.putStrLn ""
+      TIO.putStrLn "───── tool call ─────"
+      let toolName = case KM.lookup "tool_name" event of
+            Just (String s) -> s
+            _ -> "?"
+      TIO.putStrLn $ "tool: " <> toolName
+      case KM.lookup "tool_args" event of
+        Just v -> TIO.putStrLn $ "args: " <> decodeUtf8 (BL.toStrict (encode v))
+        _ -> return ()
+
+    "tool_succeeded" -> do
+      TIO.putStrLn ""
+      TIO.putStrLn "───── tool result ─────"
+      let toolName = case KM.lookup "tool_name" event of
+            Just (String s) -> s
+            _ -> "?"
+      TIO.putStrLn $ "tool: " <> toolName <> " ✓"
+      case KM.lookup "result" event of
+        Just v -> TIO.putStrLn $ decodeUtf8 $ BL.toStrict $ encode v
+        _ -> return ()
+
+    "tool_failed" -> do
+      TIO.putStrLn ""
+      TIO.putStrLn "───── tool error ─────"
+      let toolName = case KM.lookup "tool_name" event of
+            Just (String s) -> s
+            _ -> "?"
+      let err = case KM.lookup "error" event of
+            Just (String s) -> s
+            _ -> "?"
+      TIO.putStrLn $ "tool: " <> toolName <> " ✗"
+      TIO.putStrLn $ "error: " <> err
+
+    "input" -> return ()  -- Skip input events (covered by user_prompt in llm_called)
+
+    _ -> return ()  -- Skip other events
+
+showConversationEvent _ _ = return ()
+
+--------------------------------------------------------------------------------
+-- Tenant Commands
+--------------------------------------------------------------------------------
+
+runTenant :: TenantCommand -> IO ()
+runTenant TenantList = do
+  manager <- newManager defaultManagerSettings
+  req <- parseRequest $ baseUrl <> "/api/tenants"
+  response <- httpLbs req manager
+  case decode (responseBody response) of
+    Just (Object obj) -> case KM.lookup "tenants" obj of
+      Just (Array tenants) -> do
+        TIO.putStrLn "Tenants"
+        TIO.putStrLn "======="
+        TIO.putStrLn ""
+        if null tenants
+          then TIO.putStrLn "No tenants found. Create one with: wisp tenant create <name>"
+          else mapM_ showTenantBrief (toList tenants)
+      _ -> TIO.putStrLn "No tenants found"
+    _ -> TIO.putStrLn "Failed to fetch tenants"
+
+runTenant (TenantCreate name) = do
+  manager <- newManager defaultManagerSettings
+  initialReq <- parseRequest $ baseUrl <> "/api/tenants"
+  let reqBody = object ["createTenantName" .= name]
+  let req = initialReq
+        { method = "POST"
+        , requestHeaders = [("Content-Type", "application/json")]
+        , requestBody = RequestBodyLBS (encode reqBody)
+        }
+  response <- httpLbs req manager
+  case decode (responseBody response) of
+    Just (Object obj) -> case KM.lookup "tenant" obj of
+      Just (Object tenant) -> do
+        let getId = case KM.lookup "id" tenant of
+              Just (String s) -> s
+              _ -> "?"
+        let getName = case KM.lookup "name" tenant of
+              Just (String s) -> s
+              _ -> "?"
+        TIO.putStrLn $ "✅ Created tenant: " <> getName
+        TIO.putStrLn $ "   ID: " <> getId
+        TIO.putStrLn ""
+        TIO.putStrLn "Next steps:"
+        TIO.putStrLn "  1. Link accounts to this tenant during OAuth"
+        TIO.putStrLn "  2. Run seeds to create agents and skills"
+      _ -> case KM.lookup "error" obj of
+        Just (String err) -> TIO.putStrLn $ "❌ Error: " <> err
+        _ -> TIO.putStrLn "Tenant created"
+    _ -> TIO.putStrLn "❌ Failed to create tenant"
+
+runTenant (TenantShow tid) = do
+  manager <- newManager defaultManagerSettings
+  req <- parseRequest $ baseUrl <> "/api/tenants/" <> unpack tid
+  response <- httpLbs req manager
+  case decode (responseBody response) of
+    Just (Object tenant) -> case KM.lookup "error" tenant of
+      Just (String err) -> TIO.putStrLn $ "Error: " <> err
+      _ -> showTenantDetail tenant
+    _ -> TIO.putStrLn $ "Failed to fetch tenant: " <> tid
+
+showTenantBrief :: Value -> IO ()
+showTenantBrief (Object tenant) = do
+  let getId = case KM.lookup "id" tenant of
+        Just (String s) -> s
+        _ -> "?"
+  let getName = case KM.lookup "name" tenant of
+        Just (String s) -> s
+        _ -> "?"
+  TIO.putStrLn $ "  " <> getId <> "  " <> getName
+showTenantBrief _ = return ()
+
+showTenantDetail :: KM.KeyMap Value -> IO ()
+showTenantDetail tenant = do
+  let getId = case KM.lookup "id" tenant of
+        Just (String s) -> s
+        _ -> "?"
+  let getName = case KM.lookup "name" tenant of
+        Just (String s) -> s
+        _ -> "?"
+  let getCreated = case KM.lookup "created_at" tenant of
+        Just (String s) -> s
+        _ -> "?"
+  TIO.putStrLn $ "Tenant: " <> getName
+  TIO.putStrLn "========"
+  TIO.putStrLn ""
+  TIO.putStrLn $ "ID:         " <> getId
+  TIO.putStrLn $ "Created:    " <> getCreated

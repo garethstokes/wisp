@@ -25,6 +25,9 @@ module Infra.Db.Activity
   , getActivitiesByTags
   , getAllTags
   , searchTags
+  -- Tenant-scoped queries
+  , searchTagsByTenant
+  , getActivitiesByTagsTenant
   , DbActivity(..)
   ) where
 
@@ -40,7 +43,18 @@ import Database.PostgreSQL.Simple.Types (PGArray(..), Query(..))
 import Domain.Id (EntityId(..), newEntityId)
 import Domain.Activity (Activity(..), ActivitySource(..), ActivityStatus(..), NewActivity(..), normalizeTag, normalizeTags)
 import Domain.Classification (Classification(..), ActivityType(..), Urgency(..))
+import Domain.Tenant (TenantId(..))
+import Infra.Db.Tenant () -- Import for ToField/FromField TenantId instances
+import Infra.Db.Account (getTenantIdForAccount)
 import App.Monad (App, getConn)
+
+-- Convert ActivitySource to database text representation
+sourceToText :: ActivitySource -> Text
+sourceToText Email = "email"
+sourceToText Calendar = "calendar"
+sourceToText Conversation = "conversation"
+sourceToText Note = "note"
+sourceToText GitHubEvent = "github_event"
 
 -- Newtype wrapper to define FromRow instance without orphan warning
 newtype DbActivity = DbActivity { unDbActivity :: Activity }
@@ -85,22 +99,22 @@ instance FromRow DbActivity where
       parseStatus _ = Pending  -- default
 
 -- Insert a new activity (returns Nothing if duplicate)
+-- Automatically looks up tenant_id from the account
 insertActivity :: NewActivity -> App (Maybe EntityId)
 insertActivity new = do
   conn <- getConn
   aid <- liftIO newEntityId
-  let srcText = case newActivitySource new of
-        Email -> "email" :: Text
-        Calendar -> "calendar"
-        Conversation -> "conversation"
-        Note -> "note"
+  let srcText = sourceToText (newActivitySource new)
+  -- Look up tenant_id from account
+  mTenantId <- getTenantIdForAccount (newActivityAccountId new)
   n <- liftIO $ execute conn
     "insert into activities \
-    \(id, account_id, source, source_id, raw, title, sender_email, starts_at, ends_at) \
-    \values (?, ?, ?, ?, ?, ?, ?, ?, ?) \
+    \(id, account_id, tenant_id, source, source_id, raw, title, sender_email, starts_at, ends_at) \
+    \values (?, ?, ?::uuid, ?, ?, ?, ?, ?, ?, ?) \
     \on conflict (account_id, source, source_id) do nothing"
     ( unEntityId aid
     , unEntityId (newActivityAccountId new)
+    , mTenantId
     , srcText
     , newActivitySourceId new
     , newActivityRaw new
@@ -115,11 +129,7 @@ insertActivity new = do
 activityExists :: ActivitySource -> Text -> App Bool
 activityExists src srcId = do
   conn <- getConn
-  let srcText = case src of
-        Email -> "email" :: Text
-        Calendar -> "calendar"
-        Conversation -> "conversation"
-        Note -> "note"
+  let srcText = sourceToText src
   results <- liftIO $ query conn
     "select 1 from activities where source = ? and source_id = ? limit 1"
     (srcText, srcId)
@@ -378,11 +388,7 @@ updateActivityStatus aid status = do
 activityExistsForAccount :: EntityId -> ActivitySource -> Text -> App Bool
 activityExistsForAccount accountId src srcId = do
   conn <- getConn
-  let srcText = case src of
-        Email -> "email" :: Text
-        Calendar -> "calendar"
-        Conversation -> "conversation"
-        Note -> "note"
+  let srcText = sourceToText src
   results <- liftIO $ query conn
     "select 1 from activities where account_id = ? and source = ? and source_id = ? limit 1"
     (unEntityId accountId, srcText, srcId)
@@ -519,3 +525,35 @@ updateActivityTitle aid newTitle = do
     "UPDATE activities SET title = ?, updated_at = now() WHERE id = ?"
     (newTitle, unEntityId aid)
   pure ()
+
+--------------------------------------------------------------------------------
+-- Tenant-scoped queries (for knowledge: agents, skills, notes)
+--------------------------------------------------------------------------------
+
+-- | Search tags by tenant (for finding agents/skills by tag prefix)
+searchTagsByTenant :: TenantId -> Text -> Int -> App [Text]
+searchTagsByTenant tenantId prefix limit = do
+  conn <- getConn
+  let pattern = normalizeTag prefix <> "%"
+  results <- liftIO $ query conn
+    "SELECT DISTINCT tag FROM (SELECT unnest(tags) AS tag FROM activities WHERE tenant_id = ?) t \
+    \WHERE tag ILIKE ? ORDER BY tag LIMIT ?"
+    (tenantId, pattern, limit)
+  pure $ map fromOnly results
+
+-- | Get activities (notes) by tags, scoped to tenant
+getActivitiesByTagsTenant :: TenantId -> [Text] -> Int -> App [Activity]
+getActivitiesByTagsTenant tenantId tagNames limit = do
+  conn <- getConn
+  let normalizedTags = normalizeTags tagNames
+  results <- liftIO $ query conn
+    "SELECT id, account_id, source, source_id, raw, status, title, summary, \
+    \sender_email, starts_at, ends_at, created_at, \
+    \personas, activity_type, urgency, autonomy_tier, confidence, person_id, \
+    \tags, parent_id \
+    \FROM activities \
+    \WHERE tenant_id = ? AND source = 'note' AND tags && ? \
+    \ORDER BY created_at DESC \
+    \LIMIT ?"
+    (tenantId, PGArray normalizedTags, limit)
+  pure $ map unDbActivity results

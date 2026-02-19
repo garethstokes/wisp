@@ -6,6 +6,7 @@ module Infra.Db.Account
   , getAccountByEmail
   , getAccountByGitHubUsername
   , getAccountById
+  , getTenantIdForAccount
   ) where
 
 import Control.Monad.IO.Class (liftIO)
@@ -21,6 +22,7 @@ import Domain.Id (EntityId(..), newEntityId)
 import Domain.Account (Account(..), AccountProvider(..))
 import App.Monad (App, getConn)
 import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.KeyMap as KM
 
 -- ToField for AccountProvider
 instance ToField AccountProvider where
@@ -43,6 +45,7 @@ instance FromRow Account where
           other    -> returnError ConversionFailed f $ "Unknown provider: " <> T.unpack other
 
 -- Upsert account by provider and identifier (generic)
+-- Uses idx_accounts_provider_identifier which extracts email or username from details
 upsertAccountByProvider :: AccountProvider -> Value -> Maybe Text -> App Account
 upsertAccountByProvider provider details displayName = do
   conn <- getConn
@@ -51,15 +54,23 @@ upsertAccountByProvider provider details displayName = do
   _ <- liftIO $ execute conn
     "INSERT INTO accounts (id, provider, display_name, details) \
     \VALUES (?, ?, ?, ?::jsonb) \
-    \ON CONFLICT (provider, (details->>'email')) DO UPDATE SET \
+    \ON CONFLICT (provider, COALESCE(details->>'email', details->>'username')) DO UPDATE SET \
     \  display_name = COALESCE(EXCLUDED.display_name, accounts.display_name), \
     \  details = EXCLUDED.details"
     (unEntityId aid, provider, displayName, detailsJson)
-  -- Fetch the account by provider and details
+  -- Fetch the account by provider and identifier
+  -- Extract identifier from the details we're inserting
+  let identifier = case details of
+        Aeson.Object obj -> case KM.lookup "email" obj of
+          Just (Aeson.String e) -> e
+          _ -> case KM.lookup "username" obj of
+            Just (Aeson.String u) -> u
+            _ -> ""
+        _ -> ""
   results <- liftIO $ query conn
     "SELECT id, provider, display_name, details, created_at \
-    \FROM accounts WHERE provider = ? AND details = ?::jsonb"
-    (provider, detailsJson)
+    \FROM accounts WHERE provider = ? AND COALESCE(details->>'email', details->>'username') = ?"
+    (provider, identifier)
   case results of
     [acc] -> pure acc
     _ -> error "Failed to upsert account"
@@ -119,4 +130,15 @@ getAccountById aid = do
     (Only $ unEntityId aid)
   pure $ case results of
     [acc] -> Just acc
+    _ -> Nothing
+
+-- Get tenant_id for an account (for activity insertion)
+getTenantIdForAccount :: EntityId -> App (Maybe Text)
+getTenantIdForAccount aid = do
+  conn <- getConn
+  results <- liftIO $ query conn
+    "SELECT tenant_id::text FROM accounts WHERE id = ?"
+    (Only $ unEntityId aid)
+  pure $ case results of
+    [Only (Just tid)] -> Just tid
     _ -> Nothing

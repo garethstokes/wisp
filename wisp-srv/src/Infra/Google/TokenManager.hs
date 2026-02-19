@@ -13,9 +13,9 @@ import Data.Time (addUTCTime, getCurrentTime)
 import App.Monad (App, getConfig)
 import App.Config (Config(..), GoogleConfig(..))
 import Domain.Id (EntityId)
-import Domain.Account (Account(..))
+import Domain.Account (Account(..), AccountProvider(..))
 import Infra.Db.Auth (AuthToken(..), getTokenForAccount, getAllTokens, updateTokenForAccount, tokenNeedsRefresh)
-import Infra.Db.Account (getAllAccounts)
+import Infra.Db.Account (getAccountsByProvider)
 import Infra.Google.Auth (OAuthConfig(..), refreshAccessToken, TokenResponse(..))
 
 data TokenError
@@ -43,10 +43,10 @@ getValidTokenForAccount accountId = do
         then refreshAndUpdateForAccount accountId tok
         else pure $ Right (tokenAccessToken tok)
 
--- Get valid tokens for ALL accounts (for polling)
+-- Get valid tokens for all Google accounts (for polling)
 getAllValidTokens :: App [(Account, Either TokenError Text)]
 getAllValidTokens = do
-  accounts <- getAllAccounts
+  accounts <- getAccountsByProvider Google
   forM accounts $ \acc -> do
     tokenResult <- getValidTokenForAccount (accountId acc)
     pure (acc, tokenResult)
