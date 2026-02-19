@@ -9,19 +9,38 @@ import Control.Monad.Trans.Class (lift)
 import Data.Aeson (FromJSON, ToJSON, Value, object, (.=))
 import Data.Text (Text)
 import GHC.Generics (Generic)
-import Network.HTTP.Types.Status (status400, status404)
+import Network.HTTP.Types.Status (status400, status404, status500)
 import Web.Scotty.Trans (ActionT, json, status, jsonData, captureParam)
 import App.Monad (Env)
 import Skills.Registry (Skill(..), getSkill, allSkillNames)
-import Agents.Core (loadSkillPrompt)
-import Domain.Id (EntityId(..))
+import Agents.Core (loadSkillPromptByTenant)
 import Domain.Skill (skillTag, skillPromptTags)
-import Infra.Db.Activity (getActivitiesByTags, insertNote, updateActivityTitle)
+import Domain.Tenant (TenantId, Tenant(..))
+import Infra.Db.Activity (getActivitiesByTagsTenant, updateActivityTitle)
+import Infra.Db.Tenant (getAllTenants)
 import Domain.Activity (Activity(..), activityId)
 
--- | Default account ID for now (TODO: get from auth)
-defaultAccount :: EntityId
-defaultAccount = EntityId "default"
+--------------------------------------------------------------------------------
+-- Tenant resolution (TODO: get from auth token)
+--------------------------------------------------------------------------------
+
+-- | Get the current tenant (temporary: uses first tenant)
+getCurrentTenant :: ActionT (ReaderT Env IO) (Maybe TenantId)
+getCurrentTenant = do
+  tenants <- lift getAllTenants
+  pure $ case tenants of
+    (t:_) -> Just (tenantId t)
+    [] -> Nothing
+
+-- | Run action with tenant, or return 500 if no tenant
+withTenant :: (TenantId -> ActionT (ReaderT Env IO) ()) -> ActionT (ReaderT Env IO) ()
+withTenant action = do
+  mTenant <- getCurrentTenant
+  case mTenant of
+    Nothing -> do
+      status status500
+      json $ object ["error" .= ("No tenant configured. Create one with: wisp tenant create <name>" :: Text)]
+    Just tid -> action tid
 
 --------------------------------------------------------------------------------
 -- Skills Endpoints
@@ -52,7 +71,7 @@ getSkillInfo name = case getSkill name of
 
 -- | GET /api/skills/:name - get skill details including prompt
 getSkillByName :: ActionT (ReaderT Env IO) ()
-getSkillByName = do
+getSkillByName = withTenant $ \tid -> do
   name <- captureParam "name"
   case getSkill name of
     Nothing -> do
@@ -60,7 +79,7 @@ getSkillByName = do
       json $ object ["error" .= ("Skill not found: " <> name :: Text)]
     Just skill -> do
       -- Load skill prompt from knowledge
-      mPrompt <- lift $ loadSkillPrompt defaultAccount name
+      mPrompt <- lift $ loadSkillPromptByTenant tid name
       json $ object
         [ "name" .= skillName skill
         , "tools" .= skillToolNames skill
@@ -78,7 +97,7 @@ instance ToJSON UpdateSkillPromptRequest
 
 -- | PUT /api/skills/:name - update skill prompt
 putSkillPrompt :: ActionT (ReaderT Env IO) ()
-putSkillPrompt = do
+putSkillPrompt = withTenant $ \tid -> do
   name <- captureParam "name"
   req <- jsonData :: ActionT (ReaderT Env IO) UpdateSkillPromptRequest
 
@@ -90,20 +109,12 @@ putSkillPrompt = do
     Just _skill -> do
       -- Find existing skill prompt note or create new one
       let tags = skillPromptTags name
-      notes <- lift $ getActivitiesByTags defaultAccount tags 1
+      notes <- lift $ getActivitiesByTagsTenant tid tags 1
       case notes of
         [] -> do
-          -- Create new skill prompt note
-          mId <- lift $ insertNote defaultAccount (skillPrompt req) tags (object [])
-          case mId of
-            Just aid -> json $ object
-              [ "status" .= ("created" :: Text)
-              , "skill" .= name
-              , "note_id" .= aid
-              ]
-            Nothing -> do
-              status status400
-              json $ object ["error" .= ("Failed to create skill prompt" :: Text)]
+          -- For now, error - skill prompts should be seeded
+          status status400
+          json $ object ["error" .= ("Skill prompt not found. Run seeds first." :: Text)]
         (note:_) -> do
           -- Update existing prompt (stored in title field)
           lift $ updateActivityTitle (activityId note) (skillPrompt req)

@@ -43,7 +43,8 @@ getNotifiableActivities vipEmails = do
   results <- liftIO $ query conn
     "SELECT id, account_id, source, source_id, raw, status, title, summary, \
     \sender_email, starts_at, ends_at, created_at, \
-    \personas, activity_type, urgency, autonomy_tier, confidence, person_id \
+    \personas, activity_type, urgency, autonomy_tier, confidence, person_id, \
+    \tags, parent_id \
     \FROM activities \
     \WHERE notified_at IS NULL \
     \  AND (status = 'surfaced' \

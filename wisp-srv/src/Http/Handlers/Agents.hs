@@ -1,51 +1,57 @@
 module Http.Handlers.Agents
-  ( -- Legacy endpoint
-    getAgents
-    -- New agent endpoints
-  , getAgentsList
+  ( getAgentsList
   , getAgentByName
-  , postAgentChat
   , postAgentActivateSkill
   , postAgentDeactivate
   ) where
 
 import Control.Monad.Reader (ReaderT)
 import Control.Monad.Trans.Class (lift)
-import Data.Aeson (FromJSON, ToJSON, Value, object, (.=))
+import Data.Aeson (FromJSON(..), ToJSON(..), Value, object, withObject, (.:), (.=))
 import Data.Text (Text)
 import GHC.Generics (Generic)
-import Network.HTTP.Types.Status (status400, status404)
+import Network.HTTP.Types.Status (status400, status404, status500)
 import Web.Scotty.Trans (ActionT, json, status, jsonData, captureParam)
 import App.Monad (Env)
-import Agents.Dispatcher (allAgents, listAgentNames)
-import Agents.Core (Agent(..), loadAgent, buildSystemPrompt, loadSkillPrompt)
-import Skills.Base (activateAgentSkill, deactivateAgentSkill)
+import Agents.Dispatcher (listAgentNamesByTenant)
+import Agents.Core (Agent(..), loadAgentByTenant)
+import Skills.Base (activateAgentSkillByTenant, deactivateAgentSkillByTenant)
 import Skills.Registry (Skill(..), allSkillNames)
 import Domain.Agent (AgentConfig(..))
 import Domain.Soul (Soul(..))
-import Domain.Chat (ChatMessage)
-import Domain.Id (EntityId(..))
-
--- | Default account ID for now (TODO: get from auth)
-defaultAccount :: EntityId
-defaultAccount = EntityId "default"
+import Domain.Tenant (TenantId, Tenant(..))
+import Infra.Db.Tenant (getAllTenants)
 
 --------------------------------------------------------------------------------
--- Legacy endpoint
+-- Tenant resolution (TODO: get from auth token)
 --------------------------------------------------------------------------------
 
--- GET /agents (legacy - returns skill-based agents)
-getAgents :: ActionT (ReaderT Env IO) ()
-getAgents = json $ object ["agents" .= allAgents]
+-- | Get the current tenant (temporary: uses first tenant)
+getCurrentTenant :: ActionT (ReaderT Env IO) (Maybe TenantId)
+getCurrentTenant = do
+  tenants <- lift getAllTenants
+  pure $ case tenants of
+    (t:_) -> Just (tenantId t)
+    [] -> Nothing
+
+-- | Run action with tenant, or return 500 if no tenant
+withTenant :: (TenantId -> ActionT (ReaderT Env IO) ()) -> ActionT (ReaderT Env IO) ()
+withTenant action = do
+  mTenant <- getCurrentTenant
+  case mTenant of
+    Nothing -> do
+      status status500
+      json $ object ["error" .= ("No tenant configured. Create one with: wisp tenant create <name>" :: Text)]
+    Just tid -> action tid
 
 --------------------------------------------------------------------------------
--- New Agent Endpoints
+-- Agent Endpoints
 --------------------------------------------------------------------------------
 
 -- | GET /api/agents - list agent names from knowledge
 getAgentsList :: ActionT (ReaderT Env IO) ()
-getAgentsList = do
-  names <- lift $ listAgentNames defaultAccount
+getAgentsList = withTenant $ \tid -> do
+  names <- lift $ listAgentNamesByTenant tid
   json $ object
     [ "agents" .= names
     , "count" .= length names
@@ -53,9 +59,9 @@ getAgentsList = do
 
 -- | GET /api/agents/:name - get agent details
 getAgentByName :: ActionT (ReaderT Env IO) ()
-getAgentByName = do
+getAgentByName = withTenant $ \tid -> do
   name <- captureParam "name"
-  mAgent <- lift $ loadAgent defaultAccount name
+  mAgent <- lift $ loadAgentByTenant tid name
   case mAgent of
     Nothing -> do
       status status404
@@ -79,54 +85,21 @@ soulToJson soul = object
   , "insights" .= soulInsights soul
   ]
 
--- | Request body for agent chat
-data AgentChatRequest = AgentChatRequest
-  { agentChatMessages :: [ChatMessage]
-  , agentChatTimezone :: Maybe Text
-  } deriving (Show, Eq, Generic)
-
-instance FromJSON AgentChatRequest
-instance ToJSON AgentChatRequest
-
--- | POST /api/agents/:name/chat - chat with an agent
-postAgentChat :: ActionT (ReaderT Env IO) ()
-postAgentChat = do
-  name <- captureParam "name"
-  _req <- jsonData :: ActionT (ReaderT Env IO) AgentChatRequest
-
-  mAgent <- lift $ loadAgent defaultAccount name
-  case mAgent of
-    Nothing -> do
-      status status404
-      json $ object ["error" .= ("Agent not found: " <> name :: Text)]
-    Just agent -> do
-      -- Load skill prompt if skill is active
-      mSkillPrompt <- case agentSkill agent of
-        Nothing -> pure Nothing
-        Just skill -> lift $ loadSkillPrompt defaultAccount (skillName skill)
-
-      let systemPrompt = buildSystemPrompt agent mSkillPrompt
-
-      -- TODO: Call LLM with assembled prompt and handle tool calls
-      -- For now, return the assembled context
-      json $ object
-        [ "status" .= ("not_implemented" :: Text)
-        , "agent" .= agentName agent
-        , "active_skill" .= fmap skillName (agentSkill agent)
-        , "system_prompt_preview" .= take 500 (show systemPrompt)
-        ]
-
 -- | Request body for skill activation
 data ActivateSkillRequest = ActivateSkillRequest
   { activateConfirm :: Bool  -- User must confirm
   } deriving (Show, Eq, Generic)
 
-instance FromJSON ActivateSkillRequest
-instance ToJSON ActivateSkillRequest
+instance FromJSON ActivateSkillRequest where
+  parseJSON = withObject "ActivateSkillRequest" $ \v ->
+    ActivateSkillRequest <$> v .: "confirm"
+
+instance ToJSON ActivateSkillRequest where
+  toJSON req = object ["confirm" .= activateConfirm req]
 
 -- | POST /api/agents/:name/activate/:skill - activate a skill
 postAgentActivateSkill :: ActionT (ReaderT Env IO) ()
-postAgentActivateSkill = do
+postAgentActivateSkill = withTenant $ \tid -> do
   name <- captureParam "name"
   skillToActivate <- captureParam "skill"
   req <- jsonData :: ActionT (ReaderT Env IO) ActivateSkillRequest
@@ -139,7 +112,7 @@ postAgentActivateSkill = do
         , "message" .= ("Set confirm: true to activate skill" :: Text)
         ]
     else do
-      result <- lift $ activateAgentSkill defaultAccount name skillToActivate
+      result <- lift $ activateAgentSkillByTenant tid name skillToActivate
       case result of
         Left err -> do
           status status400
@@ -153,10 +126,10 @@ postAgentActivateSkill = do
 
 -- | POST /api/agents/:name/deactivate - deactivate current skill
 postAgentDeactivate :: ActionT (ReaderT Env IO) ()
-postAgentDeactivate = do
+postAgentDeactivate = withTenant $ \tid -> do
   name <- captureParam "name"
 
-  result <- lift $ deactivateAgentSkill defaultAccount name
+  result <- lift $ deactivateAgentSkillByTenant tid name
   case result of
     Left err -> do
       status status400

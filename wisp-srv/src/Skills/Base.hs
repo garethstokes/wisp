@@ -8,8 +8,8 @@ module Skills.Base
   , BaseToolResult(..)
   , parseBaseToolCall
   , executeBaseTool
-  , activateAgentSkill
-  , deactivateAgentSkill
+  , activateAgentSkillByTenant
+  , deactivateAgentSkillByTenant
   ) where
 
 import Data.Aeson (FromJSON(..), ToJSON(..), Result(..), Value(..), encode, decode, fromJSON, object, withObject, (.:), (.:?), (.=))
@@ -17,9 +17,10 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Domain.Id (EntityId)
 import Domain.Agent (AgentName, AgentConfig(..), agentTag)
+import Domain.Tenant (TenantId)
 import qualified Domain.Activity
 import App.Monad (App)
-import Infra.Db.Activity (insertNote, getActivitiesByTags, getActivity, updateActivityRaw)
+import Infra.Db.Activity (getActivitiesByTags, getActivitiesByTagsTenant, getActivity, updateActivityRaw, insertNote)
 import Skills.Registry (allSkillNames)
 
 -- | Tools available to all agents (without an active skill)
@@ -163,16 +164,16 @@ executeBaseTool accountId tool = case tool of
       "deactivate_skill"
       "Deactivate current skill?"
 
--- | Activate a skill for an agent
+-- | Activate a skill for an agent (tenant-scoped)
 -- Updates the agent's note in knowledge to set active_skill
-activateAgentSkill :: EntityId -> AgentName -> Text -> App (Either Text ())
-activateAgentSkill accountId agentName skillName = do
+activateAgentSkillByTenant :: TenantId -> AgentName -> Text -> App (Either Text ())
+activateAgentSkillByTenant tenantId agentName skillName = do
   if skillName `notElem` allSkillNames
     then pure $ Left $ "Unknown skill: " <> skillName
     else do
       -- Find the agent's note
       let tags = [agentTag agentName]
-      notes <- getActivitiesByTags accountId tags 1
+      notes <- getActivitiesByTagsTenant tenantId tags 1
       case notes of
         [] -> pure $ Left $ "Agent not found: " <> agentName
         (note:_) -> do
@@ -188,13 +189,13 @@ activateAgentSkill accountId agentName skillName = do
     activityRaw = Domain.Activity.activityRaw
     activityId = Domain.Activity.activityId
 
--- | Deactivate the current skill for an agent
+-- | Deactivate the current skill for an agent (tenant-scoped)
 -- Updates the agent's note in knowledge to clear active_skill
-deactivateAgentSkill :: EntityId -> AgentName -> App (Either Text ())
-deactivateAgentSkill accountId agentName = do
+deactivateAgentSkillByTenant :: TenantId -> AgentName -> App (Either Text ())
+deactivateAgentSkillByTenant tenantId agentName = do
   -- Find the agent's note
   let tags = [agentTag agentName]
-  notes <- getActivitiesByTags accountId tags 1
+  notes <- getActivitiesByTagsTenant tenantId tags 1
   case notes of
     [] -> pure $ Left $ "Agent not found: " <> agentName
     (note:_) -> do

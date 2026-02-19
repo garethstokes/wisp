@@ -4,9 +4,9 @@
 module Agents.Core
   ( Agent(..)
   , ToolExecutionResult(..)
-  , loadAgent
+  , loadAgentByTenant
   , buildSystemPrompt
-  , loadSkillPrompt
+  , loadSkillPromptByTenant
   , executeTool
   ) where
 
@@ -19,9 +19,10 @@ import Domain.Skill (SkillName, skillPromptTags)
 import Domain.Soul (Soul(..))
 import Domain.Activity (Activity(..), activityRaw, activityTitle)
 import Domain.Id (EntityId)
-import Skills.Registry (Skill(..), SkillToolResult(..), getSkill, executeSkillTool)
+import Domain.Tenant (TenantId)
+import Skills.Registry (Skill(..), ToolDef(..), SkillToolResult(..), getSkill, executeSkillTool, baseTools)
 import Skills.Base (baseToolNames, baseToolNamesWithSkill, parseBaseToolCall, executeBaseTool, BaseToolResult(..))
-import Infra.Db.Activity (getActivitiesByTags)
+import Infra.Db.Activity (getActivitiesByTagsTenant)
 import Infra.Db.Soul (getOrCreateSoul)
 import App.Monad (App)
 
@@ -33,13 +34,13 @@ data Agent = Agent
   , agentSkill  :: Maybe Skill  -- ^ Currently active skill (resolved from config)
   }
 
--- | Load an agent from knowledge
+-- | Load an agent from knowledge (tenant-scoped)
 -- Looks for a note with tag "agent:NAME" containing AgentConfig JSON
-loadAgent :: EntityId -> AgentName -> App (Maybe Agent)
-loadAgent accountId name = do
+loadAgentByTenant :: TenantId -> AgentName -> App (Maybe Agent)
+loadAgentByTenant tenantId name = do
   -- Find agent definition note
   let tags = [agentTag name]
-  notes <- getActivitiesByTags accountId tags 1
+  notes <- getActivitiesByTagsTenant tenantId tags 1
   case notes of
     [] -> pure Nothing
     (note:_) -> do
@@ -68,13 +69,32 @@ buildSystemPrompt agent mSkillPrompt = T.unlines
   , ""
   , buildSoulSection (agentSoul agent)
   , ""
+  , "## Response Format"
+  , "CRITICAL: You MUST respond with ONLY valid JSON. No markdown, no explanation, no text outside JSON."
+  , ""
+  , "When responding to the user (no tools needed):"
+  , "{\"msg\": \"Your response to the user\"}"
+  , ""
+  , "When you need to call tools:"
+  , "{\"msg\": \"Brief status\", \"tools\": [{\"tool\": \"tool_name\", \"param\": \"value\"}, ...]}"
+  , ""
+  , "After receiving tool results, respond with another JSON object (more tools or final msg)."
+  , "ALWAYS output valid JSON. Never output plain text."
+  , ""
   , case mSkillPrompt of
       Just prompt -> "## Active Skill\n\n" <> prompt
       Nothing -> "## Available Actions\n\nYou can search and read knowledge, add notes, or activate a skill for specialized tasks."
   , ""
   , "## Tools"
-  , T.unlines $ map ("- " <>) $ baseToolNames <> maybe [] skillToolNames (agentSkill agent)
+  , ""
+  , formatToolDefs $ baseTools <> maybe [] skillTools (agentSkill agent)
   ]
+
+-- | Format tool definitions as JSON examples
+formatToolDefs :: [ToolDef] -> Text
+formatToolDefs defs = T.unlines $ map formatTool defs
+  where
+    formatTool (ToolDef name schema) = name <> ":\n  " <> schema
 
 -- | Build soul section for system prompt
 buildSoulSection :: Soul -> Text
@@ -92,12 +112,12 @@ buildSoulSection soul
         else T.unlines $ map ("- " <>) (soulInsights soul)
       ]
 
--- | Load skill prompt from knowledge
+-- | Load skill prompt from knowledge (tenant-scoped)
 -- Looks for a note with tags [skill:NAME, prompt]
-loadSkillPrompt :: EntityId -> SkillName -> App (Maybe Text)
-loadSkillPrompt accountId name = do
+loadSkillPromptByTenant :: TenantId -> SkillName -> App (Maybe Text)
+loadSkillPromptByTenant tenantId name = do
   let tags = skillPromptTags name
-  notes <- getActivitiesByTags accountId tags 1
+  notes <- getActivitiesByTagsTenant tenantId tags 1
   case notes of
     [] -> pure Nothing
     (note:_) -> pure $ activityTitle note
@@ -111,8 +131,9 @@ data ToolExecutionResult
 
 -- | Execute a tool call for an agent
 -- Routes base tools to Skills.Base, skill-specific tools to the active skill
-executeTool :: Agent -> EntityId -> Text -> Value -> App ToolExecutionResult
-executeTool agent accountId toolName params
+-- mTimezone: Optional IANA timezone for date/time formatting in skill tools
+executeTool :: Agent -> EntityId -> Text -> Value -> Maybe Text -> App ToolExecutionResult
+executeTool agent accountId toolName params mTimezone
   -- Check if it's a base tool
   | toolName `elem` allBaseTools = executeBaseToolCall accountId toolName params
   -- Otherwise try skill tools
@@ -120,7 +141,7 @@ executeTool agent accountId toolName params
       Nothing -> pure $ ToolExecError $ "No skill active for tool: " <> toolName
       Just skill
         | toolName `elem` skillToolNames skill ->
-            executeSkillToolCall skill accountId toolName params
+            executeSkillToolCall skill accountId toolName params mTimezone
         | otherwise ->
             pure $ ToolExecError $ "Tool not available: " <> toolName
   where
@@ -139,9 +160,9 @@ executeBaseToolCall accountId toolName params =
         PermissionRequest action msg -> ToolExecPermission action msg
 
 -- | Execute a skill tool call
-executeSkillToolCall :: Skill -> EntityId -> Text -> Value -> App ToolExecutionResult
-executeSkillToolCall skill accountId toolName params = do
-  result <- executeSkillTool skill accountId toolName params
+executeSkillToolCall :: Skill -> EntityId -> Text -> Value -> Maybe Text -> App ToolExecutionResult
+executeSkillToolCall skill accountId toolName params mTimezone = do
+  result <- executeSkillTool skill accountId toolName params mTimezone
   pure $ case result of
     SkillToolSuccess v -> ToolExecSuccess v
     SkillToolError e -> ToolExecError e

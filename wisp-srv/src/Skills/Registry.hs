@@ -3,16 +3,23 @@
 -- Each skill provides tools and can fetch its own context.
 module Skills.Registry
   ( Skill(..)
+  , ToolDef(..)
   , SkillContext(..)
   , SkillToolResult(..)
   , getSkill
   , allSkillNames
   , emptySkillContext
   , executeSkillTool
+  , baseTools
   ) where
 
-import Data.Aeson (Value, toJSON)
+import Control.Exception (try, SomeException)
+import Control.Monad.IO.Class (liftIO)
+import Data.Aeson (Result(..), Value(..), fromJSON, toJSON)
+import qualified Data.Aeson.KeyMap as KM
 import Data.Text (Text)
+import qualified Data.Text as T
+import Data.Time.Zones (TZ, loadSystemTZ)
 import Domain.Activity (Activity)
 import Domain.Person (Person)
 import Domain.Id (EntityId)
@@ -32,10 +39,17 @@ data SkillContext = SkillContext
 emptySkillContext :: SkillContext
 emptySkillContext = SkillContext [] [] (toJSON ())
 
+-- | Tool definition with name and example JSON schema
+data ToolDef = ToolDef
+  { toolDefName   :: Text   -- ^ Tool name
+  , toolDefSchema :: Text   -- ^ Example JSON showing parameters
+  } deriving (Show, Eq)
+
 -- | A skill provides tools and can fetch its own context
 data Skill = Skill
   { skillName         :: Text              -- ^ Skill identifier (e.g. "concierge")
-  , skillToolNames    :: [Text]            -- ^ Tool names this skill provides
+  , skillToolNames    :: [Text]            -- ^ Tool names this skill provides (for backwards compat)
+  , skillTools        :: [ToolDef]         -- ^ Tool definitions with schemas
   , skillFetchContext :: App SkillContext  -- ^ How to get skill-specific context
   }
 
@@ -51,28 +65,51 @@ getSkill "insights"  = Just insightsSkill
 getSkill _           = Nothing
 
 -- Skill definitions
--- Context fetching will be implemented when we wire up the full agent core
 
 conciergeSkill :: Skill
 conciergeSkill = Skill
   { skillName = "concierge"
   , skillToolNames = ["update_activities", "query_activities", "query_people"]
-  , skillFetchContext = pure emptySkillContext  -- TODO: fetch pending activities
+  , skillTools =
+      [ ToolDef "update_activities" "{\"tool\": \"update_activities\", \"activity_ids\": [\"id1\", \"id2\"], \"status\": \"processed\"}"
+      , ToolDef "query_activities" "{\"tool\": \"query_activities\", \"status\": \"pending\", \"limit\": 10}"
+      , ToolDef "query_people" "{\"tool\": \"query_people\", \"search\": \"name or email\", \"limit\": 10}"
+      ]
+  , skillFetchContext = pure emptySkillContext
   }
 
 schedulerSkill :: Skill
 schedulerSkill = Skill
   { skillName = "scheduler"
-  , skillToolNames = ["query_calendar", "find_free_slots"]
-  , skillFetchContext = pure emptySkillContext  -- TODO: fetch calendar events
+  , skillToolNames = ["query_calendar", "find_free_slots", "list_connected_accounts"]
+  , skillTools =
+      [ ToolDef "query_calendar" "{\"tool\": \"query_calendar\", \"days\": 7}"
+      , ToolDef "find_free_slots" "{\"tool\": \"find_free_slots\", \"days\": 7, \"duration_minutes\": 60, \"start_hour\": 9, \"end_hour\": 17}"
+      , ToolDef "list_connected_accounts" "{\"tool\": \"list_connected_accounts\"}"
+      ]
+  , skillFetchContext = pure emptySkillContext
   }
 
 insightsSkill :: Skill
 insightsSkill = Skill
   { skillName = "insights"
   , skillToolNames = ["search_activities", "get_summary", "get_people_insights"]
-  , skillFetchContext = pure emptySkillContext  -- TODO: fetch recent activity stats
+  , skillTools =
+      [ ToolDef "search_activities" "{\"tool\": \"search_activities\", \"query\": \"search text\", \"limit\": 20}"
+      , ToolDef "get_summary" "{\"tool\": \"get_summary\", \"hours\": 24}"
+      , ToolDef "get_people_insights" "{\"tool\": \"get_people_insights\", \"search\": \"name\", \"important_only\": true}"
+      ]
+  , skillFetchContext = pure emptySkillContext
   }
+
+-- | Base tools available to all agents
+baseTools :: [ToolDef]
+baseTools =
+  [ ToolDef "search_knowledge" "{\"tool\": \"search_knowledge\", \"query\": \"search text\"}"
+  , ToolDef "read_note" "{\"tool\": \"read_note\", \"id\": \"note_id\"}"
+  , ToolDef "add_note" "{\"tool\": \"add_note\", \"title\": \"Note title\", \"content\": \"Note content\", \"tags\": [\"tag1\"]}"
+  , ToolDef "activate_skill" "{\"tool\": \"activate_skill\", \"skill\": \"scheduler\"}"
+  ]
 
 -- | Result from executing a skill tool
 data SkillToolResult
@@ -80,99 +117,179 @@ data SkillToolResult
   | SkillToolError Text
   deriving (Show, Eq)
 
+-- | Load timezone from IANA name, returning Nothing if invalid
+loadTimezone :: Maybe Text -> App (Maybe TZ)
+loadTimezone Nothing = pure Nothing
+loadTimezone (Just tzName) = do
+  result <- liftIO $ try $ loadSystemTZ (T.unpack tzName)
+  case result of
+    Left (_ :: SomeException) -> pure Nothing
+    Right tz -> pure (Just tz)
+
 -- | Execute a skill tool by name
 -- Routes to the appropriate skill's tool executor
-executeSkillTool :: Skill -> EntityId -> Text -> Value -> App SkillToolResult
-executeSkillTool skill _accountId toolName params
-  | skillName skill == "concierge" = executeConcierge toolName params
-  | skillName skill == "scheduler" = executeScheduler toolName params
-  | skillName skill == "insights" = executeInsights toolName params
+-- timezone: Optional IANA timezone for date/time formatting
+executeSkillTool :: Skill -> EntityId -> Text -> Value -> Maybe Text -> App SkillToolResult
+executeSkillTool skill accountId toolName params mTimezone
+  | skillName skill == "concierge" = executeConcierge accountId toolName params
+  | skillName skill == "scheduler" = executeScheduler toolName params mTimezone
+  | skillName skill == "insights" = executeInsights toolName params mTimezone
   | otherwise = pure $ SkillToolError $ "Unknown skill: " <> skillName skill
 
--- | Execute concierge tool
-executeConcierge :: Text -> Value -> App SkillToolResult
-executeConcierge toolName params = do
-  let mToolCall = parseConciergeToolCall toolName params
-  case mToolCall of
-    Nothing -> pure $ SkillToolError $ "Unknown concierge tool: " <> toolName
-    Just toolCall -> do
-      result <- Concierge.executeToolCall toolCall
-      pure $ case result of
-        Concierge.ToolSuccess v -> SkillToolSuccess v
-        Concierge.ToolError e -> SkillToolError e
+--------------------------------------------------------------------------------
+-- Concierge Tool Execution
+--------------------------------------------------------------------------------
 
--- | Parse concierge tool call from name and params
-parseConciergeToolCall :: Text -> Value -> Maybe Concierge.ConciergeToolCall
-parseConciergeToolCall "update_activities" params = parseUpdateActivities params
-parseConciergeToolCall "query_activities" params = parseQueryActivities params
-parseConciergeToolCall "query_people" params = parseQueryPeople params
-parseConciergeToolCall _ _ = Nothing
+executeConcierge :: EntityId -> Text -> Value -> App SkillToolResult
+executeConcierge _accountId toolName params = case toolName of
+  "query_activities" -> do
+    case parseActivityFilter params of
+      Left err -> pure $ SkillToolError err
+      Right filter' -> do
+        result <- Concierge.executeToolCall (Concierge.QueryActivities filter')
+        toSkillResult result
 
-parseUpdateActivities :: Value -> Maybe Concierge.ConciergeToolCall
-parseUpdateActivities _ = Nothing  -- TODO: parse from Value
+  "query_people" -> do
+    case parsePeopleFilter params of
+      Left err -> pure $ SkillToolError err
+      Right filter' -> do
+        result <- Concierge.executeToolCall (Concierge.QueryPeople filter')
+        toSkillResult result
 
-parseQueryActivities :: Value -> Maybe Concierge.ConciergeToolCall
-parseQueryActivities _ = Just $ Concierge.QueryActivities Concierge.ActivityFilter
-  { Concierge.filterStatus = Nothing
-  , Concierge.filterLimit = Just 20
-  , Concierge.filterSince = Nothing
-  , Concierge.filterBefore = Nothing
-  }
+  "update_activities" -> do
+    case parseUpdateActivities params of
+      Left err -> pure $ SkillToolError err
+      Right (ids, updates) -> do
+        result <- Concierge.executeToolCall (Concierge.UpdateActivities ids updates)
+        toSkillResult result
 
-parseQueryPeople :: Value -> Maybe Concierge.ConciergeToolCall
-parseQueryPeople _ = Just $ Concierge.QueryPeople Concierge.PeopleFilter
-  { Concierge.peopleEmail = Nothing
-  , Concierge.peopleSearch = Nothing
-  , Concierge.peopleLimit = Just 20
-  }
+  _ -> pure $ SkillToolError $ "Unknown concierge tool: " <> toolName
 
--- | Execute scheduler tool
-executeScheduler :: Text -> Value -> App SkillToolResult
-executeScheduler toolName params = do
-  let mToolCall = parseSchedulerToolCall toolName params
-  case mToolCall of
-    Nothing -> pure $ SkillToolError $ "Unknown scheduler tool: " <> toolName
-    Just toolCall -> do
-      result <- Scheduler.executeToolCall Nothing toolCall  -- No timezone in this context
-      pure $ case result of
-        Scheduler.ToolSuccess v -> SkillToolSuccess v
-        Scheduler.ToolError e -> SkillToolError e
+-- Parse activity filter from JSON
+parseActivityFilter :: Value -> Either Text Concierge.ActivityFilter
+parseActivityFilter v = case fromJSON v of
+  Success f -> Right f
+  Error e -> Left $ "Invalid activity filter: " <> T.pack e
 
-parseSchedulerToolCall :: Text -> Value -> Maybe Scheduler.SchedulerToolCall
-parseSchedulerToolCall "query_calendar" _ = Just $ Scheduler.QueryCalendar Scheduler.CalendarQuery
-  { Scheduler.calendarDays = Just 7
-  , Scheduler.calendarDate = Nothing
-  }
-parseSchedulerToolCall "find_free_slots" _ = Just $ Scheduler.FindFreeSlots Scheduler.FreeSlotQuery
-  { Scheduler.slotDays = Just 7
-  , Scheduler.slotDuration = Just 60
-  , Scheduler.slotStartHour = Just 9
-  , Scheduler.slotEndHour = Just 17
-  }
-parseSchedulerToolCall _ _ = Nothing
+-- Parse people filter from JSON
+parsePeopleFilter :: Value -> Either Text Concierge.PeopleFilter
+parsePeopleFilter v = case fromJSON v of
+  Success f -> Right f
+  Error e -> Left $ "Invalid people filter: " <> T.pack e
 
--- | Execute insights tool
-executeInsights :: Text -> Value -> App SkillToolResult
-executeInsights toolName params = do
-  let mToolCall = parseInsightsToolCall toolName params
-  case mToolCall of
-    Nothing -> pure $ SkillToolError $ "Unknown insights tool: " <> toolName
-    Just toolCall -> do
-      result <- Insights.executeToolCall Nothing toolCall  -- No timezone in this context
-      pure $ case result of
-        Insights.ToolSuccess v -> SkillToolSuccess v
-        Insights.ToolError e -> SkillToolError e
+-- Parse update activities from JSON
+-- Expects: {"activity_ids": [...], "status": "...", "classification": {...}}
+parseUpdateActivities :: Value -> Either Text ([Text], Concierge.ActivityUpdates)
+parseUpdateActivities (Object v) = do
+  case KM.lookup "activity_ids" v of
+    Nothing -> Left "Missing activity_ids field"
+    Just idsVal -> case fromJSON idsVal of
+      Error e -> Left $ "Invalid activity_ids: " <> T.pack e
+      Success ids -> case fromJSON (Object v) of
+        Error e -> Left $ "Invalid updates: " <> T.pack e
+        Success updates -> Right (ids, updates)
+parseUpdateActivities _ = Left "Expected object for update_activities"
 
-parseInsightsToolCall :: Text -> Value -> Maybe Insights.InsightsToolCall
-parseInsightsToolCall "search_activities" _ = Just $ Insights.SearchActivities Insights.SearchQuery
-  { Insights.searchTerm = ""
-  , Insights.searchLimit = Just 20
-  }
-parseInsightsToolCall "get_summary" _ = Just $ Insights.GetSummary Insights.SummaryQuery
-  { Insights.summaryHours = Just 24
-  }
-parseInsightsToolCall "get_people_insights" _ = Just $ Insights.GetPeopleInsights Insights.PeopleQuery
-  { Insights.peopleSearch = Nothing
-  , Insights.peopleImportantOnly = Nothing
-  }
-parseInsightsToolCall _ _ = Nothing
+-- Note: FromJSON instances for Concierge types are defined in Skills.Concierge
+
+toSkillResult :: Concierge.ToolResult -> App SkillToolResult
+toSkillResult (Concierge.ToolSuccess v) = pure $ SkillToolSuccess v
+toSkillResult (Concierge.ToolError e) = pure $ SkillToolError e
+
+--------------------------------------------------------------------------------
+-- Scheduler Tool Execution
+--------------------------------------------------------------------------------
+
+executeScheduler :: Text -> Value -> Maybe Text -> App SkillToolResult
+executeScheduler toolName params mTimezone = do
+  -- Convert timezone string to TZ
+  mTz <- loadTimezone mTimezone
+  case toolName of
+    "query_calendar" -> do
+      case parseCalendarQuery params of
+        Left err -> pure $ SkillToolError err
+        Right query -> do
+          result <- Scheduler.executeToolCall mTz (Scheduler.QueryCalendar query)
+          toSchedulerResult result
+
+    "find_free_slots" -> do
+      case parseFreeSlotQuery params of
+        Left err -> pure $ SkillToolError err
+        Right query -> do
+          result <- Scheduler.executeToolCall mTz (Scheduler.FindFreeSlots query)
+          toSchedulerResult result
+
+    "list_connected_accounts" -> do
+      result <- Scheduler.executeToolCall mTz Scheduler.ListConnectedAccounts
+      toSchedulerResult result
+
+    _ -> pure $ SkillToolError $ "Unknown scheduler tool: " <> toolName
+
+parseCalendarQuery :: Value -> Either Text Scheduler.CalendarQuery
+parseCalendarQuery v = case fromJSON v of
+  Success q -> Right q
+  Error e -> Left $ "Invalid calendar query: " <> T.pack e
+
+parseFreeSlotQuery :: Value -> Either Text Scheduler.FreeSlotQuery
+parseFreeSlotQuery v = case fromJSON v of
+  Success q -> Right q
+  Error e -> Left $ "Invalid free slot query: " <> T.pack e
+
+-- Note: FromJSON instances for Scheduler queries are defined in Skills.Scheduler
+
+toSchedulerResult :: Scheduler.ToolResult -> App SkillToolResult
+toSchedulerResult (Scheduler.ToolSuccess v) = pure $ SkillToolSuccess v
+toSchedulerResult (Scheduler.ToolError e) = pure $ SkillToolError e
+
+--------------------------------------------------------------------------------
+-- Insights Tool Execution
+--------------------------------------------------------------------------------
+
+executeInsights :: Text -> Value -> Maybe Text -> App SkillToolResult
+executeInsights toolName params mTimezone = do
+  -- Convert timezone string to TZ
+  mTz <- loadTimezone mTimezone
+  case toolName of
+    "search_activities" -> do
+      case parseSearchQuery params of
+        Left err -> pure $ SkillToolError err
+        Right query -> do
+          result <- Insights.executeToolCall mTz (Insights.SearchActivities query)
+          toInsightsResult result
+
+    "get_summary" -> do
+      case parseSummaryQuery params of
+        Left err -> pure $ SkillToolError err
+        Right query -> do
+          result <- Insights.executeToolCall mTz (Insights.GetSummary query)
+          toInsightsResult result
+
+    "get_people_insights" -> do
+      case parsePeopleInsightsQuery params of
+        Left err -> pure $ SkillToolError err
+        Right query -> do
+          result <- Insights.executeToolCall mTz (Insights.GetPeopleInsights query)
+          toInsightsResult result
+
+    _ -> pure $ SkillToolError $ "Unknown insights tool: " <> toolName
+
+parseSearchQuery :: Value -> Either Text Insights.SearchQuery
+parseSearchQuery v = case fromJSON v of
+  Success q -> Right q
+  Error e -> Left $ "Invalid search query: " <> T.pack e
+
+parseSummaryQuery :: Value -> Either Text Insights.SummaryQuery
+parseSummaryQuery v = case fromJSON v of
+  Success q -> Right q
+  Error e -> Left $ "Invalid summary query: " <> T.pack e
+
+parsePeopleInsightsQuery :: Value -> Either Text Insights.PeopleQuery
+parsePeopleInsightsQuery v = case fromJSON v of
+  Success q -> Right q
+  Error e -> Left $ "Invalid people insights query: " <> T.pack e
+
+-- Note: FromJSON instances for Insights queries are defined in Skills.Insights
+
+toInsightsResult :: Insights.ToolResult -> App SkillToolResult
+toInsightsResult (Insights.ToolSuccess v) = pure $ SkillToolSuccess v
+toInsightsResult (Insights.ToolError e) = pure $ SkillToolError e
