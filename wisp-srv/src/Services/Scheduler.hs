@@ -16,6 +16,7 @@ import App.Monad (App, Env(..), runApp, getConfig, getLogger, getClassificationQ
 import Domain.Id (EntityId)
 import Services.GmailPoller (pollAllGmail)
 import Services.CalendarPoller (pollAllCalendar)
+import Services.GitHubPoller (pollAllGitHub)
 import Services.ClassificationQueue (enqueueActivities)
 
 -- Helper to log within App monad
@@ -55,8 +56,20 @@ runPollCycle = do
       mapM_ logAccountResult $ map (\(e, r) -> ("Calendar", e, fmap length r)) calResults
       pure allIds
 
+  -- Poll GitHub for all accounts
+  githubResults <- pollAllGitHub
+  githubIds <- case githubResults of
+    [] -> do
+      logInfo "GitHub: no accounts configured"
+      pure []
+    _ -> do
+      let allIds = concat [ids | (_, Right ids) <- githubResults]
+      logInfo $ "GitHub: imported " <> T.pack (show (length allIds)) <> " events total"
+      mapM_ logAccountResult $ map (\(u, r) -> ("GitHub", u, fmap length r)) githubResults
+      pure allIds
+
   -- Enqueue newly imported activities for classification
-  let newIds = gmailIds ++ calIds
+  let newIds = gmailIds ++ calIds ++ githubIds
   enqueueForClassification newIds
 
   logInfo "Poll cycle complete"
