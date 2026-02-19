@@ -46,6 +46,9 @@ data Command
   | Activate Text Text            -- agent skill
   | Deactivate Text               -- agent
   | Tenant TenantCommand          -- Tenant management
+  | Project ProjectCommand        -- Project management
+  | Note NoteCommand              -- Note management
+  | Pref PrefCommand              -- Preference management
   | Sessions SessionsOptions
   | Runs
   | Run Text
@@ -56,6 +59,22 @@ data TenantCommand
   = TenantList
   | TenantCreate Text             -- name
   | TenantShow Text               -- id
+  deriving (Show)
+
+data ProjectCommand
+  = ProjectList
+  | ProjectCreate Text Text       -- name, type
+  | ProjectArchive Text           -- id
+  deriving (Show)
+
+data NoteCommand
+  = NoteList (Maybe Text)         -- optional tag filter
+  | NoteCreate Text (Maybe Text) [Text]  -- title, content, tags
+  deriving (Show)
+
+data PrefCommand
+  = PrefList
+  | PrefSet Text Text (Maybe Text)  -- key, value, context
   deriving (Show)
 
 data ChatOptions = ChatOptions
@@ -88,6 +107,9 @@ commandParser =
         <> command "activate" (info activateParser (progDesc "Activate a skill for an agent"))
         <> command "deactivate" (info deactivateParser (progDesc "Deactivate current skill for an agent"))
         <> command "tenant" (info tenantParser (progDesc "Manage tenants"))
+        <> command "project" (info projectParser (progDesc "Manage projects"))
+        <> command "note" (info noteParser (progDesc "Manage notes"))
+        <> command "pref" (info prefParser (progDesc "Manage preferences"))
         <> command "sessions" (info sessionsParser (progDesc "Manage chat sessions"))
         <> command "people" (info (pure People) (progDesc "List contacts extracted from activities"))
         <> command "poll" (info (pure Poll) (progDesc "Fetch new emails and calendar events now"))
@@ -156,6 +178,51 @@ tenantCreateParser = TenantCreate <$> strArgument (metavar "NAME" <> help "Tenan
 
 tenantShowParser :: Parser TenantCommand
 tenantShowParser = TenantShow <$> strArgument (metavar "ID" <> help "Tenant UUID")
+
+projectParser :: Parser Command
+projectParser = Project <$> subparser
+  ( command "list" (info (pure ProjectList) (progDesc "List active projects"))
+  <> command "create" (info projectCreateParser (progDesc "Create a project"))
+  <> command "archive" (info projectArchiveParser (progDesc "Archive a project"))
+  )
+
+projectCreateParser :: Parser ProjectCommand
+projectCreateParser = ProjectCreate
+  <$> strArgument (metavar "NAME" <> help "Project name")
+  <*> strArgument (metavar "TYPE" <> help "Type: work, personal, family, health, spiritual")
+
+projectArchiveParser :: Parser ProjectCommand
+projectArchiveParser = ProjectArchive
+  <$> strArgument (metavar "ID" <> help "Project ID")
+
+noteParser :: Parser Command
+noteParser = Note <$> subparser
+  ( command "list" (info noteListParser (progDesc "List notes"))
+  <> command "create" (info noteCreateParser (progDesc "Create a note"))
+  )
+
+noteListParser :: Parser NoteCommand
+noteListParser = NoteList <$> optional (strOption (long "tag" <> short 't' <> metavar "TAG"))
+
+noteCreateParser :: Parser NoteCommand
+noteCreateParser = NoteCreate
+  <$> strArgument (metavar "TITLE" <> help "Note title")
+  <*> optional (strOption (long "content" <> short 'c' <> metavar "CONTENT"))
+  <*> (parseTags <$> strOption (long "tags" <> value "" <> metavar "TAGS" <> help "Comma-separated tags"))
+  where
+    parseTags s = filter (not . T.null) $ map T.strip $ T.splitOn "," (T.pack s)
+
+prefParser :: Parser Command
+prefParser = Pref <$> subparser
+  ( command "list" (info (pure PrefList) (progDesc "List preferences"))
+  <> command "set" (info prefSetParser (progDesc "Set a preference"))
+  )
+
+prefSetParser :: Parser PrefCommand
+prefSetParser = PrefSet
+  <$> strArgument (metavar "KEY" <> help "Preference key")
+  <*> strArgument (metavar "VALUE" <> help "Preference value")
+  <*> optional (strOption (long "context" <> metavar "CONTEXT"))
 
 authParser :: Parser Command
 authParser = Auth <$> subparser
@@ -282,6 +349,9 @@ main = do
     Activate agent skill -> runActivate agent skill
     Deactivate agent -> runDeactivate agent
     Tenant tenantCmd -> runTenant tenantCmd
+    Project projectCmd -> runProject projectCmd
+    Note noteCmd -> runNote noteCmd
+    Pref prefCmd -> runPref prefCmd
     Sessions sessOpts -> runSessions sessOpts
     Runs -> runRuns tz
     Run rid -> runRun tz rid
@@ -313,6 +383,17 @@ runHelp = do
   TIO.putStrLn "  tenant list         List all tenants"
   TIO.putStrLn "  tenant create NAME  Create a new tenant"
   TIO.putStrLn "  tenant show ID      Show tenant details"
+  TIO.putStrLn "  project list        List active projects"
+  TIO.putStrLn "  project create NAME TYPE  Create a project"
+  TIO.putStrLn "  project archive ID  Archive a project"
+  TIO.putStrLn "  note list           List notes"
+  TIO.putStrLn "    -t, --tag TAG     Filter by tag"
+  TIO.putStrLn "  note create TITLE   Create a note"
+  TIO.putStrLn "    -c, --content     Note content"
+  TIO.putStrLn "    --tags            Comma-separated tags"
+  TIO.putStrLn "  pref list           List preferences"
+  TIO.putStrLn "  pref set KEY VALUE  Set a preference"
+  TIO.putStrLn "    --context         Optional context"
   TIO.putStrLn "  sessions            List chat sessions"
   TIO.putStrLn "    -d, --delete      Delete a session"
   TIO.putStrLn "  people              List contacts from activities"
@@ -1537,3 +1618,24 @@ showTenantDetail tenant = do
   TIO.putStrLn ""
   TIO.putStrLn $ "ID:         " <> getId
   TIO.putStrLn $ "Created:    " <> getCreated
+
+--------------------------------------------------------------------------------
+-- Project Commands
+--------------------------------------------------------------------------------
+
+runProject :: ProjectCommand -> IO ()
+runProject _ = putStrLn "Project commands not yet implemented"
+
+--------------------------------------------------------------------------------
+-- Note Commands
+--------------------------------------------------------------------------------
+
+runNote :: NoteCommand -> IO ()
+runNote _ = putStrLn "Note commands not yet implemented"
+
+--------------------------------------------------------------------------------
+-- Pref Commands
+--------------------------------------------------------------------------------
+
+runPref :: PrefCommand -> IO ()
+runPref _ = putStrLn "Pref commands not yet implemented"
