@@ -60,6 +60,7 @@ executable wisp-srv
         Http.Handlers.Agents
         Http.Handlers.Auth
         Http.Handlers.Chat
+        Http.Handlers.Documents
         Http.Handlers.Health
         Http.Handlers.People
         Http.Handlers.Pipeline
