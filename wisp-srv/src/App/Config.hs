@@ -3,6 +3,7 @@ module App.Config
   , ServerConfig(..)
   , DatabaseConfig(..)
   , GoogleConfig(..)
+  , GitHubConfig(..)
   , PollingConfig(..)
   , ClassificationConfig(..)
   , ClaudeConfig(..)
@@ -38,7 +39,17 @@ data GoogleConfig = GoogleConfig
 instance FromJSON GoogleConfig
 
 instance Show GoogleConfig where
-  show c = "GoogleConfig {clientId = " <> show (clientId c) <> ", clientSecret = \"<redacted>\"}"
+  show c = "GoogleConfig {clientId = " <> show (c.clientId) <> ", clientSecret = \"<redacted>\"}"
+
+data GitHubConfig = GitHubConfig
+  { clientId :: Text
+  , clientSecret :: Text
+  } deriving (Generic)
+
+instance FromJSON GitHubConfig
+
+instance Show GitHubConfig where
+  show c = "GitHubConfig {clientId = " <> show (c.clientId) <> ", clientSecret = \"<redacted>\"}"
 
 data PollingConfig = PollingConfig
   { intervalMinutes :: Int
@@ -87,6 +98,7 @@ data Config = Config
   { server :: ServerConfig
   , database :: DatabaseConfig
   , google :: GoogleConfig
+  , github :: Maybe GitHubConfig
   , polling :: PollingConfig
   , classification :: ClassificationConfig
   , claude :: ClaudeConfig
@@ -105,7 +117,14 @@ loadConfig path = do
       mPort <- lookupEnv "PORT"
       mGoogleClientId <- lookupEnv "GOOGLE_CLIENT_ID"
       mGoogleClientSecret <- lookupEnv "GOOGLE_CLIENT_SECRET"
+      mGitHubClientId <- lookupEnv "GITHUB_CLIENT_ID"
+      mGitHubClientSecret <- lookupEnv "GITHUB_CLIENT_SECRET"
       mAnthropicApiKey <- lookupEnv "ANTHROPIC_API_KEY"
+
+      let githubConfig = case (mGitHubClientId, mGitHubClientSecret) of
+            (Just cid, Just cs) -> Just $ GitHubConfig (T.pack cid) (T.pack cs)
+            _ -> cfg.github
+
       pure cfg
         { database = cfg.database
             { url = maybe cfg.database.url T.pack mDbUrl
@@ -117,6 +136,7 @@ loadConfig path = do
             { clientId = maybe cfg.google.clientId T.pack mGoogleClientId
             , clientSecret = maybe cfg.google.clientSecret T.pack mGoogleClientSecret
             }
+        , github = githubConfig
         , claude = cfg.claude
             { apiKey = maybe cfg.claude.apiKey T.pack mAnthropicApiKey
             }
