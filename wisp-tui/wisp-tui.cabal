@@ -13,6 +13,7 @@ executable wisp-tui
     import:           warnings
     main-is:          Main.hs
     other-modules:
+        Tui.DataLoader
         Tui.Types
         Tui.Views.Activities
         Tui.Views.Approvals

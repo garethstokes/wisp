@@ -1,15 +1,18 @@
 module Main where
 
 import Brick
-import Brick.BChan (newBChan, writeBChan)
+import Brick.BChan (BChan, newBChan, writeBChan)
 import Brick.Widgets.Border (hBorder)
 import Control.Concurrent (forkIO, threadDelay)
+import Control.Concurrent.Async (async)
+import Control.Monad.IO.Class (liftIO)
 import Control.Monad (forever, void)
 import Data.Time (getCurrentTime)
 import qualified Graphics.Vty as V
 import qualified Graphics.Vty.CrossPlatform as V
-import Lens.Micro ((%~), (^.))
+import Lens.Micro ((%~), (^.), (.~))
 
+import Tui.DataLoader (loadActivities, loadDocuments, loadApprovals, DataLoadResult(..))
 import Tui.Types
 import Tui.Views.Activities (activitiesWidget, handleActivitiesEvent)
 import Tui.Views.Approvals (approvalsWidget, handleApprovalsEvent)
@@ -44,7 +47,7 @@ main = do
         , _documentsState = DocumentsState ProjectsTab [] [] [] 0
         , _approvalsState = ApprovalsState [] 0 Nothing
         , _clientConfig = defaultConfig
-        , _statusMessage = Just ("Welcome to wisp-tui", now)
+        , _statusMessage = Just ("Welcome to wisp-tui | Ctrl-Q to quit", now)
         }
 
   -- Build vty
@@ -52,13 +55,13 @@ main = do
   initialVty <- buildVty
 
   -- Run app
-  void $ customMain initialVty buildVty (Just chan) app initialState
+  void $ customMain initialVty buildVty (Just chan) (app chan) initialState
 
-app :: App AppState AppEvent Name
-app = App
+app :: BChan AppEvent -> App AppState AppEvent Name
+app chan = App
   { appDraw = drawUI
   , appChooseCursor = showFirstCursor
-  , appHandleEvent = handleEvent
+  , appHandleEvent = handleEvent chan
   , appStartEvent = pure ()
   , appAttrMap = const theMap
   }
@@ -90,20 +93,57 @@ viewContent s = case s ^. currentView of
   DocumentsView -> documentsWidget (s ^. documentsState)
   ApprovalsView -> approvalsWidget (s ^. approvalsState)
 
-handleEvent :: BrickEvent Name AppEvent -> EventM Name AppState ()
-handleEvent (VtyEvent (V.EvKey (V.KChar 'q') [V.MCtrl])) = halt
-handleEvent (VtyEvent (V.EvKey (V.KChar '\t') [])) = do
+handleEvent :: BChan AppEvent -> BrickEvent Name AppEvent -> EventM Name AppState ()
+handleEvent _ (VtyEvent (V.EvKey (V.KChar 'q') [V.MCtrl])) = halt
+handleEvent chan (VtyEvent (V.EvKey (V.KChar '\t') [])) = do
   modify $ currentView %~ nextView
-handleEvent (VtyEvent (V.EvKey V.KBackTab [])) = do
+  triggerDataLoad chan
+handleEvent chan (VtyEvent (V.EvKey V.KBackTab [])) = do
   modify $ currentView %~ prevView
-handleEvent (VtyEvent e) = do
+  triggerDataLoad chan
+handleEvent chan (VtyEvent (V.EvKey (V.KChar 'r') [])) = do
+  -- Refresh current view
+  triggerDataLoad chan
+handleEvent _ (AppEvent (RefreshView _)) = do
+  -- Placeholder for when we receive loaded data
+  pure ()
+handleEvent _ (AppEvent Tick) = pure ()
+handleEvent chan (AppEvent (ChatEventReceived evt)) = do
+  -- Handle chat streaming events (wired up in Task 14)
+  pure ()
+handleEvent _ (VtyEvent e) = do
   s <- get
   case s ^. currentView of
     ChatView -> handleChatEvent e
     ActivitiesView -> handleActivitiesEvent e
     DocumentsView -> handleDocumentsEvent e
     ApprovalsView -> handleApprovalsEvent e
-handleEvent _ = pure ()
+handleEvent _ _ = pure ()
+
+-- | Trigger async data load for current view
+triggerDataLoad :: BChan AppEvent -> EventM Name AppState ()
+triggerDataLoad chan = do
+  s <- get
+  let cfg = s ^. clientConfig
+      view = s ^. currentView
+
+  -- Fork async load based on view
+  void $ liftIO $ async $ do
+    result <- case view of
+      ActivitiesView -> loadActivities cfg
+      DocumentsView -> loadDocuments cfg
+      ApprovalsView -> loadApprovals cfg
+      ChatView -> pure $ LoadError "Chat doesn't need loading"
+
+    -- Send result back via channel
+    case result of
+      ActivitiesLoaded _ ->
+        writeBChan chan (RefreshView ActivitiesView)
+      DocumentsLoaded {} ->
+        writeBChan chan (RefreshView DocumentsView)
+      ApprovalsLoaded _ ->
+        writeBChan chan (RefreshView ApprovalsView)
+      LoadError _ -> pure ()
 
 nextView :: View -> View
 nextView ChatView = ActivitiesView
