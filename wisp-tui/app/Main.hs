@@ -13,6 +13,7 @@ import Lens.Micro ((%~), (^.))
 import Tui.Types
 import Tui.Views.Activities (activitiesWidget, handleActivitiesEvent)
 import Tui.Views.Chat (chatWidget, handleChatEvent)
+import Tui.Views.Documents (documentsWidget, handleDocumentsEvent)
 import Tui.Widgets.Layout (headerWidget, statusBarWidget)
 import Wisp.Client (defaultConfig)
 
@@ -85,7 +86,7 @@ viewContent :: AppState -> Widget Name
 viewContent s = case s ^. currentView of
   ChatView -> chatWidget (s ^. chatState)
   ActivitiesView -> activitiesWidget (s ^. activitiesState)
-  DocumentsView -> padAll 1 $ str "Documents view"
+  DocumentsView -> documentsWidget (s ^. documentsState)
   ApprovalsView -> padAll 1 $ str "Approvals view"
 
 handleEvent :: BrickEvent Name AppEvent -> EventM Name AppState ()
@@ -99,6 +100,7 @@ handleEvent (VtyEvent e) = do
   case s ^. currentView of
     ChatView -> handleChatEvent e
     ActivitiesView -> handleActivitiesEvent e
+    DocumentsView -> handleDocumentsEvent e
     _ -> pure ()
 handleEvent _ = pure ()
 

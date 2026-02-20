@@ -16,6 +16,7 @@ executable wisp-tui
         Tui.Types
         Tui.Views.Activities
         Tui.Views.Chat
+        Tui.Views.Documents
         Tui.Widgets.Layout
     hs-source-dirs:   app, src
     default-language: GHC2021
@@ -26,6 +27,7 @@ executable wisp-tui
     build-depends:
         base >=4.17 && <5,
         wisp-core,
+        aeson,
         brick >= 2.0,
         vty >= 6.0,
         vty-crossplatform,
