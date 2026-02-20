@@ -1,0 +1,226 @@
+module Wisp.Client
+  ( -- * Client operations
+    getActivities
+  , getActivity
+  , getDocuments
+  , getProjects
+  , getNotes
+  , getPreferences
+  , createProject
+  , createNote
+  , setPreference
+  , archiveDocument
+  , approveActivity
+  , dismissActivity
+  , getApprovals
+  , ApprovalItem(..)
+    -- * Re-exports
+  , module Wisp.Client.Types
+  , module Wisp.Client.Activities
+  , module Wisp.Client.Documents
+  ) where
+
+import Control.Exception (try, SomeException)
+import Data.Aeson (FromJSON, ToJSON, decode, encode, object, (.=))
+import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.KeyMap as KM
+import Data.Text (Text)
+import qualified Data.Text as T
+import Network.HTTP.Client
+import Network.HTTP.Types.Status (statusCode)
+
+import Wisp.Client.Types
+import Wisp.Client.Activities
+import Wisp.Client.Documents
+
+-- | Make a GET request
+httpGet :: FromJSON a => ClientConfig -> String -> IO (Either ClientError a)
+httpGet cfg path = do
+  manager <- newManager defaultManagerSettings
+  result <- try $ do
+    req <- parseRequest $ T.unpack (configBaseUrl cfg) <> path
+    httpLbs req manager
+  case result of
+    Left (e :: SomeException) -> pure $ Left $ HttpError $ T.pack $ show e
+    Right response ->
+      let code = statusCode $ responseStatus response
+      in if code >= 200 && code < 300
+         then case decode (responseBody response) of
+           Just a -> pure $ Right a
+           Nothing -> pure $ Left $ ParseError "Failed to parse response"
+         else pure $ Left $ ServerError code $ T.pack $ show $ responseBody response
+
+-- | Make a POST request with JSON body
+httpPost :: (ToJSON a, FromJSON b) => ClientConfig -> String -> a -> IO (Either ClientError b)
+httpPost cfg path body = do
+  manager <- newManager defaultManagerSettings
+  result <- try $ do
+    initialReq <- parseRequest $ T.unpack (configBaseUrl cfg) <> path
+    let req = initialReq
+          { method = "POST"
+          , requestHeaders = [("Content-Type", "application/json")]
+          , requestBody = RequestBodyLBS (encode body)
+          }
+    httpLbs req manager
+  case result of
+    Left (e :: SomeException) -> pure $ Left $ HttpError $ T.pack $ show e
+    Right response ->
+      let code = statusCode $ responseStatus response
+      in if code >= 200 && code < 300
+         then case decode (responseBody response) of
+           Just a -> pure $ Right a
+           Nothing -> pure $ Left $ ParseError "Failed to parse response"
+         else pure $ Left $ ServerError code $ T.pack $ show $ responseBody response
+
+-- | POST without expecting response body
+httpPost_ :: ToJSON a => ClientConfig -> String -> a -> IO (Either ClientError ())
+httpPost_ cfg path body = do
+  manager <- newManager defaultManagerSettings
+  result <- try $ do
+    initialReq <- parseRequest $ T.unpack (configBaseUrl cfg) <> path
+    let req = initialReq
+          { method = "POST"
+          , requestHeaders = [("Content-Type", "application/json")]
+          , requestBody = RequestBodyLBS (encode body)
+          }
+    httpLbs req manager
+  case result of
+    Left (e :: SomeException) -> pure $ Left $ HttpError $ T.pack $ show e
+    Right response ->
+      let code = statusCode $ responseStatus response
+      in if code >= 200 && code < 300
+         then pure $ Right ()
+         else pure $ Left $ ServerError code $ T.pack $ show $ responseBody response
+
+-- Activities
+getActivities :: ClientConfig -> IO (Either ClientError [Activity])
+getActivities cfg = do
+  result <- httpGet cfg "/api/activities"
+  pure $ case result of
+    Left e -> Left e
+    Right val -> case val of
+      Aeson.Object obj -> case KM.lookup "activities" obj of
+        Just (Aeson.Array arr) -> case traverse Aeson.fromJSON arr of
+          Aeson.Success activities -> Right $ toList activities
+          _ -> Left $ ParseError "Failed to parse activities array"
+        _ -> Left $ ParseError "Missing activities key"
+      _ -> Left $ ParseError "Expected object"
+
+getActivity :: ClientConfig -> Text -> IO (Either ClientError Activity)
+getActivity cfg aid = httpGet cfg $ "/api/activities/" <> T.unpack aid
+
+-- Documents
+getDocuments :: ClientConfig -> DocumentType -> IO (Either ClientError [Document])
+getDocuments cfg docType = do
+  let path = case docType of
+        ProjectDoc -> "/api/projects"
+        NoteDoc -> "/api/notes"
+        PreferenceDoc -> "/api/preferences"
+  result <- httpGet cfg path
+  pure $ case result of
+    Left e -> Left e
+    Right val -> case val of
+      Aeson.Object obj ->
+        let key = case docType of
+              ProjectDoc -> "projects"
+              NoteDoc -> "notes"
+              PreferenceDoc -> "preferences"
+        in case KM.lookup key obj of
+          Just (Aeson.Array arr) -> case traverse Aeson.fromJSON arr of
+            Aeson.Success docs -> Right $ toList docs
+            _ -> Left $ ParseError "Failed to parse documents"
+          _ -> Left $ ParseError "Missing documents key"
+      _ -> Left $ ParseError "Expected object"
+
+getProjects :: ClientConfig -> IO (Either ClientError [Document])
+getProjects cfg = getDocuments cfg ProjectDoc
+
+getNotes :: ClientConfig -> IO (Either ClientError [Document])
+getNotes cfg = getDocuments cfg NoteDoc
+
+getPreferences :: ClientConfig -> IO (Either ClientError [Document])
+getPreferences cfg = getDocuments cfg PreferenceDoc
+
+createProject :: ClientConfig -> Text -> Text -> IO (Either ClientError Text)
+createProject cfg name projType = do
+  result <- httpPost cfg "/api/projects" $ object ["name" .= name, "type" .= projType]
+  pure $ case result of
+    Left e -> Left e
+    Right (Aeson.Object obj) -> case KM.lookup "id" obj of
+      Just (Aeson.String pid) -> Right pid
+      _ -> Left $ ParseError "Missing id in response"
+    Right _ -> Left $ ParseError "Expected object"
+
+createNote :: ClientConfig -> Text -> Maybe Text -> [Text] -> IO (Either ClientError Text)
+createNote cfg title mContent tags = do
+  let body = object $ ["title" .= title]
+        <> maybe [] (\c -> ["content" .= c]) mContent
+        <> if null tags then [] else ["tags" .= tags]
+  result <- httpPost cfg "/api/notes" body
+  pure $ case result of
+    Left e -> Left e
+    Right (Aeson.Object obj) -> case KM.lookup "id" obj of
+      Just (Aeson.String nid) -> Right nid
+      _ -> Left $ ParseError "Missing id"
+    Right _ -> Left $ ParseError "Expected object"
+
+setPreference :: ClientConfig -> Text -> Text -> Maybe Text -> IO (Either ClientError Text)
+setPreference cfg key value mContext = do
+  let body = object $ ["key" .= key, "value" .= value]
+        <> maybe [] (\c -> ["context" .= c]) mContext
+  result <- httpPost cfg "/api/preferences" body
+  pure $ case result of
+    Left e -> Left e
+    Right (Aeson.Object obj) -> case KM.lookup "id" obj of
+      Just (Aeson.String pid) -> Right pid
+      _ -> Left $ ParseError "Missing id"
+    Right _ -> Left $ ParseError "Expected object"
+
+archiveDocument :: ClientConfig -> Text -> IO (Either ClientError ())
+archiveDocument cfg docId =
+  httpPost_ cfg ("/api/projects/" <> T.unpack docId <> "/archive") (object [])
+
+-- Approvals
+data ApprovalItem = ApprovalItem
+  { approvalActivity :: Activity
+  , approvalType :: Text  -- "quarantine" or "classify"
+  , approvalReason :: Text
+  } deriving (Show, Eq)
+
+instance FromJSON ApprovalItem where
+  parseJSON = Aeson.withObject "ApprovalItem" $ \v -> ApprovalItem
+    <$> v Aeson..: "activity"
+    <*> v Aeson..: "type"
+    <*> v Aeson..: "reason"
+
+getApprovals :: ClientConfig -> IO (Either ClientError [ApprovalItem])
+getApprovals cfg = do
+  -- Fetch both quarantined and review items, combine them
+  result <- httpGet cfg "/inbox"
+  pure $ case result of
+    Left e -> Left e
+    Right (Aeson.Object obj) -> Right $ concat
+      [ extractItems "quarantine" "quarantined" obj
+      , extractItems "classify" "review" obj
+      ]
+    Right _ -> Left $ ParseError "Expected object"
+  where
+    extractItems aType key obj = case KM.lookup key obj of
+      Just (Aeson.Array arr) ->
+        [ ApprovalItem act aType "needs review"
+        | Aeson.Object actObj <- toList arr
+        , Aeson.Success act <- [Aeson.fromJSON (Aeson.Object actObj)]
+        ]
+      _ -> []
+
+approveActivity :: ClientConfig -> Text -> IO (Either ClientError ())
+approveActivity cfg aid =
+  httpPost_ cfg ("/api/activities/" <> T.unpack aid <> "/approve") (object [])
+
+dismissActivity :: ClientConfig -> Text -> IO (Either ClientError ())
+dismissActivity cfg aid =
+  httpPost_ cfg ("/api/activities/" <> T.unpack aid <> "/dismiss") (object [])
+
+-- Helper
+toList :: Foldable t => t a -> [a]
+toList = foldr (:) []

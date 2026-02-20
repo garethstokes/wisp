@@ -12,6 +12,7 @@ common warnings
 library
     import:           warnings
     exposed-modules:
+        Wisp.Client
         Wisp.Client.Types
         Wisp.Client.Activities
         Wisp.Client.Documents
