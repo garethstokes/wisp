@@ -1,0 +1,29 @@
+cabal-version: 3.0
+name:          wisp-core
+version:       0.1.0.0
+synopsis:      Wisp client library
+license:       BSD-3-Clause
+author:        Gareth
+build-type:    Simple
+
+common warnings
+    ghc-options: -Wall -Wunused-packages
+
+library
+    import:           warnings
+    exposed-modules:
+        Wisp.Client.Types
+    hs-source-dirs:   src
+    default-language: GHC2021
+    default-extensions:
+        OverloadedStrings
+        LambdaCase
+        DeriveGeneric
+    build-depends:
+        base >=4.17 && <5,
+        text,
+        aeson,
+        bytestring,
+        time,
+        http-client,
+        http-types
