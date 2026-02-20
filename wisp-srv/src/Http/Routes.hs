@@ -9,6 +9,7 @@ import Http.Handlers.Auth (getGoogleAuth, getGoogleCallback, getGitHubAuth, getG
 import Http.Handlers.Health (getHealth)
 import Http.Handlers.Activities (getActivities, getActivityStats, getActivityById, getActivityLogs, getInbox, getReview, approveActivity, dismissActivity, triggerPoll)
 import Http.Handlers.Chat (postChat)
+import Http.Handlers.ChatStream (postChatStream)
 import Http.Handlers.People (getPeople, getPersonById)
 import Http.Handlers.Pipeline (postRunPipeline, postClassifyActivity)
 import Http.Handlers.Runs (getRuns, getRunById)
@@ -66,6 +67,7 @@ routes = do
 
   -- Chat
   post "/chat" postChat
+  post "/api/chat/stream" postChatStream
 
   -- Classification pipeline
   post "/pipeline/run" postRunPipeline
