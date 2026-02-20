@@ -16,6 +16,7 @@ library
         Wisp.Client.Types
         Wisp.Client.Activities
         Wisp.Client.Documents
+        Wisp.Client.SSE
     hs-source-dirs:   src
     default-language: GHC2021
     default-extensions:
