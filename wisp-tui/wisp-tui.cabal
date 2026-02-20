@@ -1,0 +1,34 @@
+cabal-version: 3.0
+name:          wisp-tui
+version:       0.1.0.0
+synopsis:      Wisp TUI client
+license:       BSD-3-Clause
+author:        Gareth
+build-type:    Simple
+
+common warnings
+    ghc-options: -Wall -Wunused-packages
+
+executable wisp-tui
+    import:           warnings
+    main-is:          Main.hs
+    other-modules:
+        Tui.Types
+    hs-source-dirs:   app, src
+    default-language: GHC2021
+    default-extensions:
+        OverloadedStrings
+        LambdaCase
+        TemplateHaskell
+    build-depends:
+        base >=4.17 && <5,
+        wisp-core,
+        brick >= 2.0,
+        vty >= 6.0,
+        vty-crossplatform,
+        text,
+        microlens,
+        microlens-th,
+        stm,
+        async,
+        time

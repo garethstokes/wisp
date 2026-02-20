@@ -1,2 +1,2 @@
 -- cabal.project
-packages: wisp-srv, wisp-cli, wisp-core
+packages: wisp-srv, wisp-cli, wisp-core, wisp-tui
