@@ -12,6 +12,7 @@ import Lens.Micro ((%~), (^.))
 
 import Tui.Types
 import Tui.Views.Activities (activitiesWidget, handleActivitiesEvent)
+import Tui.Views.Approvals (approvalsWidget, handleApprovalsEvent)
 import Tui.Views.Chat (chatWidget, handleChatEvent)
 import Tui.Views.Documents (documentsWidget, handleDocumentsEvent)
 import Tui.Widgets.Layout (headerWidget, statusBarWidget)
@@ -87,7 +88,7 @@ viewContent s = case s ^. currentView of
   ChatView -> chatWidget (s ^. chatState)
   ActivitiesView -> activitiesWidget (s ^. activitiesState)
   DocumentsView -> documentsWidget (s ^. documentsState)
-  ApprovalsView -> padAll 1 $ str "Approvals view"
+  ApprovalsView -> approvalsWidget (s ^. approvalsState)
 
 handleEvent :: BrickEvent Name AppEvent -> EventM Name AppState ()
 handleEvent (VtyEvent (V.EvKey (V.KChar 'q') [V.MCtrl])) = halt
@@ -101,7 +102,7 @@ handleEvent (VtyEvent e) = do
     ChatView -> handleChatEvent e
     ActivitiesView -> handleActivitiesEvent e
     DocumentsView -> handleDocumentsEvent e
-    _ -> pure ()
+    ApprovalsView -> handleApprovalsEvent e
 handleEvent _ = pure ()
 
 nextView :: View -> View
