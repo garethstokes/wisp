@@ -44,6 +44,7 @@ executable wisp-srv
         Domain.Activity
         Domain.Agent
         Domain.Chat
+        Domain.ChatEvent
         Domain.Classification
         Domain.Document
         Domain.Id
