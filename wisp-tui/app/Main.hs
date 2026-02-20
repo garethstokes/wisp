@@ -11,6 +11,7 @@ import qualified Graphics.Vty.CrossPlatform as V
 import Lens.Micro ((%~), (^.))
 
 import Tui.Types
+import Tui.Views.Activities (activitiesWidget, handleActivitiesEvent)
 import Tui.Views.Chat (chatWidget, handleChatEvent)
 import Tui.Widgets.Layout (headerWidget, statusBarWidget)
 import Wisp.Client (defaultConfig)
@@ -83,7 +84,7 @@ drawUI s =
 viewContent :: AppState -> Widget Name
 viewContent s = case s ^. currentView of
   ChatView -> chatWidget (s ^. chatState)
-  ActivitiesView -> padAll 1 $ str "Activities view"
+  ActivitiesView -> activitiesWidget (s ^. activitiesState)
   DocumentsView -> padAll 1 $ str "Documents view"
   ApprovalsView -> padAll 1 $ str "Approvals view"
 
@@ -97,6 +98,7 @@ handleEvent (VtyEvent e) = do
   s <- get
   case s ^. currentView of
     ChatView -> handleChatEvent e
+    ActivitiesView -> handleActivitiesEvent e
     _ -> pure ()
 handleEvent _ = pure ()
 
