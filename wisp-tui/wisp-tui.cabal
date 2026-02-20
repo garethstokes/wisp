@@ -14,6 +14,7 @@ executable wisp-tui
     main-is:          Main.hs
     other-modules:
         Tui.Types
+        Tui.Views.Chat
         Tui.Widgets.Layout
     hs-source-dirs:   app, src
     default-language: GHC2021

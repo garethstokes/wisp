@@ -11,6 +11,7 @@ import qualified Graphics.Vty.CrossPlatform as V
 import Lens.Micro ((%~), (^.))
 
 import Tui.Types
+import Tui.Views.Chat (chatWidget, handleChatEvent)
 import Tui.Widgets.Layout (headerWidget, statusBarWidget)
 import Wisp.Client (defaultConfig)
 
@@ -63,6 +64,9 @@ theMap :: AttrMap
 theMap = attrMap V.defAttr
   [ (attrName "selectedTab", V.withStyle V.defAttr V.bold)
   , (attrName "connected", fg V.green)
+  , (attrName "userRole", fg V.cyan)
+  , (attrName "assistantRole", fg V.magenta)
+  , (attrName "cursor", V.withStyle V.defAttr V.blink)
   ]
 
 drawUI :: AppState -> [Widget Name]
@@ -77,18 +81,23 @@ drawUI s =
   ]
 
 viewContent :: AppState -> Widget Name
-viewContent s = padAll 1 $ case s ^. currentView of
-  ChatView -> str "Chat view - Press 'q' to quit"
-  ActivitiesView -> str "Activities view"
-  DocumentsView -> str "Documents view"
-  ApprovalsView -> str "Approvals view"
+viewContent s = case s ^. currentView of
+  ChatView -> chatWidget (s ^. chatState)
+  ActivitiesView -> padAll 1 $ str "Activities view"
+  DocumentsView -> padAll 1 $ str "Documents view"
+  ApprovalsView -> padAll 1 $ str "Approvals view"
 
 handleEvent :: BrickEvent Name AppEvent -> EventM Name AppState ()
-handleEvent (VtyEvent (V.EvKey (V.KChar 'q') [])) = halt
+handleEvent (VtyEvent (V.EvKey (V.KChar 'q') [V.MCtrl])) = halt
 handleEvent (VtyEvent (V.EvKey (V.KChar '\t') [])) = do
   modify $ currentView %~ nextView
 handleEvent (VtyEvent (V.EvKey V.KBackTab [])) = do
   modify $ currentView %~ prevView
+handleEvent (VtyEvent e) = do
+  s <- get
+  case s ^. currentView of
+    ChatView -> handleChatEvent e
+    _ -> pure ()
 handleEvent _ = pure ()
 
 nextView :: View -> View
