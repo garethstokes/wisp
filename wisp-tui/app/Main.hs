@@ -7,16 +7,18 @@ import Control.Concurrent (forkIO, threadDelay)
 import Control.Concurrent.Async (async)
 import Control.Monad.IO.Class (liftIO)
 import Control.Monad (forever, void)
+import qualified Data.Text as T
 import Data.Time (getCurrentTime)
 import qualified Graphics.Vty as V
 import qualified Graphics.Vty.CrossPlatform as V
 import Lens.Micro ((%~), (^.), (.~))
 
 import Tui.DataLoader (loadActivities, loadDocuments, loadApprovals, DataLoadResult(..))
+import Wisp.Client.SSE (ChatEvent(..))
 import Tui.Types
 import Tui.Views.Activities (activitiesWidget, handleActivitiesEvent)
 import Tui.Views.Approvals (approvalsWidget, handleApprovalsEvent)
-import Tui.Views.Chat (chatWidget, handleChatEvent)
+import Tui.Views.Chat (chatWidget, handleChatEvent, sendChatMessage)
 import Tui.Views.Documents (documentsWidget, handleDocumentsEvent)
 import Tui.Widgets.Layout (headerWidget, statusBarWidget)
 import Wisp.Client (defaultConfig)
@@ -108,9 +110,14 @@ handleEvent _ (AppEvent (RefreshView _)) = do
   -- Placeholder for when we receive loaded data
   pure ()
 handleEvent _ (AppEvent Tick) = pure ()
-handleEvent chan (AppEvent (ChatEventReceived evt)) = do
-  -- Handle chat streaming events (wired up in Task 14)
-  pure ()
+handleEvent _ (AppEvent (ChatEventReceived evt)) = do
+  -- Handle chat streaming events
+  handleSSEEvent evt
+handleEvent chan (VtyEvent (V.EvKey V.KEnter [])) = do
+  s <- get
+  case s ^. currentView of
+    ChatView -> handleChatEnter chan
+    _ -> pure ()
 handleEvent _ (VtyEvent e) = do
   s <- get
   case s ^. currentView of
@@ -156,3 +163,45 @@ prevView ChatView = ApprovalsView
 prevView ActivitiesView = ChatView
 prevView DocumentsView = ActivitiesView
 prevView ApprovalsView = DocumentsView
+
+-- | Handle Enter key in chat view
+handleChatEnter :: BChan AppEvent -> EventM Name AppState ()
+handleChatEnter chan = do
+  s <- get
+  let input = s ^. chatState . csInputBuffer
+  if T.null input
+    then pure ()
+    else do
+      -- Add user message
+      now <- liftIO getCurrentTime
+      let userMsg = ChatMessage "You" input now
+      modify $ chatState . csMessages %~ (++ [userMsg])
+      modify $ chatState . csInputBuffer .~ ""
+      modify $ chatState . csStreaming .~ True
+
+      -- Send to server
+      let cfg = s ^. clientConfig
+          agent = s ^. chatState . csCurrentAgent
+          session = s ^. chatState . csCurrentSession
+      liftIO $ sendChatMessage cfg agent session input chan
+
+-- | Handle SSE events from chat streaming
+handleSSEEvent :: ChatEvent -> EventM Name AppState ()
+handleSSEEvent (ChunkEvent chunk) = do
+  modify $ chatState . csStreamBuffer %~ (<> chunk)
+handleSSEEvent (ToolCallStart name) = do
+  modify $ chatState . csStreamBuffer %~ (<> "\n[calling " <> name <> "...]")
+handleSSEEvent (ToolCallResult name ms) = do
+  modify $ chatState . csStreamBuffer %~ (<> "\n[" <> name <> " completed in " <> T.pack (show ms) <> "ms]")
+handleSSEEvent (DoneEvent _ _) = do
+  s <- get
+  now <- liftIO getCurrentTime
+  let response = s ^. chatState . csStreamBuffer
+  let assistantMsg = ChatMessage "Assistant" response now
+  modify $ chatState . csMessages %~ (++ [assistantMsg])
+  modify $ chatState . csStreamBuffer .~ ""
+  modify $ chatState . csStreaming .~ False
+handleSSEEvent (ErrorEvent msg _) = do
+  now <- liftIO getCurrentTime
+  modify $ statusMessage .~ Just (msg, now)
+  modify $ chatState . csStreaming .~ False

@@ -1,16 +1,23 @@
 module Tui.Views.Chat
   ( chatWidget
   , handleChatEvent
+  , sendChatMessage
   ) where
 
 import Brick
+import Brick.BChan (BChan, writeBChan)
 import Brick.Widgets.Border (hBorder)
+import Control.Concurrent.Async (async)
+import Control.Monad (void)
+import Data.Time (getCurrentTime)
 import qualified Graphics.Vty as V
 import Data.Text (Text)
 import qualified Data.Text as T
 import Lens.Micro ((^.), (.~), (%~))
 
 import Tui.Types
+import Wisp.Client (ClientConfig)
+import Wisp.Client.SSE (streamChat, ChatRequest(..), ChatEvent(..))
 
 -- | Chat view widget
 chatWidget :: ChatState -> Widget Name
@@ -61,15 +68,21 @@ inputWidget cs = vLimit 1 $ hBox
 -- | Handle chat-specific events
 handleChatEvent :: V.Event -> EventM Name AppState ()
 handleChatEvent (V.EvKey V.KEnter []) = do
-  s <- get
-  let input = s ^. chatState . csInputBuffer
-  if T.null input
-    then pure ()
-    else do
-      -- Clear input (message sending will be wired up in Task 14)
-      modify $ chatState . csInputBuffer .~ ""
+  -- Enter is handled in Main with access to BChan
+  pure ()
 handleChatEvent (V.EvKey V.KBS []) = do
   modify $ chatState . csInputBuffer %~ (\t -> if T.null t then t else T.init t)
 handleChatEvent (V.EvKey (V.KChar c) []) = do
   modify $ chatState . csInputBuffer %~ (<> T.singleton c)
 handleChatEvent _ = pure ()
+
+-- | Send a chat message and stream responses
+sendChatMessage :: ClientConfig -> Text -> Text -> Text -> BChan AppEvent -> IO ()
+sendChatMessage cfg agent session msg chan = void $ async $ do
+  let req = ChatRequest agent msg session
+  _ <- streamChat cfg req $ \evt -> do
+    writeBChan chan (ChatEventReceived (toAppEvent evt))
+  pure ()
+  where
+    toAppEvent :: ChatEvent -> Wisp.Client.SSE.ChatEvent
+    toAppEvent = id
