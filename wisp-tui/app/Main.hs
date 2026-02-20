@@ -2,14 +2,16 @@ module Main where
 
 import Brick
 import Brick.BChan (newBChan, writeBChan)
+import Brick.Widgets.Border (hBorder)
 import Control.Concurrent (forkIO, threadDelay)
 import Control.Monad (forever, void)
 import Data.Time (getCurrentTime)
 import qualified Graphics.Vty as V
 import qualified Graphics.Vty.CrossPlatform as V
-import Lens.Micro ((%~))
+import Lens.Micro ((%~), (^.))
 
 import Tui.Types
+import Tui.Widgets.Layout (headerWidget, statusBarWidget)
 import Wisp.Client (defaultConfig)
 
 main :: IO ()
@@ -54,16 +56,39 @@ app = App
   , appChooseCursor = showFirstCursor
   , appHandleEvent = handleEvent
   , appStartEvent = pure ()
-  , appAttrMap = const $ attrMap V.defAttr []
+  , appAttrMap = const theMap
   }
 
+theMap :: AttrMap
+theMap = attrMap V.defAttr
+  [ (attrName "selectedTab", V.withStyle V.defAttr V.bold)
+  , (attrName "connected", fg V.green)
+  ]
+
 drawUI :: AppState -> [Widget Name]
-drawUI s = [str $ "wisp-tui - " <> show (_currentView s) <> " - Press q to quit, Tab to switch views"]
+drawUI s =
+  [ vBox
+      [ headerWidget (s ^. currentView) (s ^. chatState . csCurrentAgent)
+      , hBorder
+      , viewContent s
+      , hBorder
+      , statusBarWidget (fst <$> s ^. statusMessage)
+      ]
+  ]
+
+viewContent :: AppState -> Widget Name
+viewContent s = padAll 1 $ case s ^. currentView of
+  ChatView -> str "Chat view - Press 'q' to quit"
+  ActivitiesView -> str "Activities view"
+  DocumentsView -> str "Documents view"
+  ApprovalsView -> str "Approvals view"
 
 handleEvent :: BrickEvent Name AppEvent -> EventM Name AppState ()
 handleEvent (VtyEvent (V.EvKey (V.KChar 'q') [])) = halt
 handleEvent (VtyEvent (V.EvKey (V.KChar '\t') [])) = do
   modify $ currentView %~ nextView
+handleEvent (VtyEvent (V.EvKey V.KBackTab [])) = do
+  modify $ currentView %~ prevView
 handleEvent _ = pure ()
 
 nextView :: View -> View
@@ -71,3 +96,9 @@ nextView ChatView = ActivitiesView
 nextView ActivitiesView = DocumentsView
 nextView DocumentsView = ApprovalsView
 nextView ApprovalsView = ChatView
+
+prevView :: View -> View
+prevView ChatView = ApprovalsView
+prevView ActivitiesView = ChatView
+prevView DocumentsView = ActivitiesView
+prevView ApprovalsView = DocumentsView
