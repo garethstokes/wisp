@@ -130,7 +130,8 @@ executable wisp-srv
         neat-interpolation,
         process,
         uuid,
-        case-insensitive
+        case-insensitive,
+        vector
 
 test-suite wisp-srv-test
     import:           warnings
@@ -302,4 +303,5 @@ test-suite wisp-srv-test
         neat-interpolation,
         process,
         uuid,
-        case-insensitive
+        case-insensitive,
+        vector

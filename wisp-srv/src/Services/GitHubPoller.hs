@@ -6,10 +6,12 @@ module Services.GitHubPoller
 
 import Control.Monad (forM)
 import Control.Monad.IO.Class (liftIO)
-import Data.Aeson (toJSON)
+import Data.Aeson (toJSON, Value(..))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KM
 import Data.Text (Text)
+import qualified Data.Text as T
+import qualified Data.Vector as V
 
 import App.Monad (App)
 import Domain.Id (EntityId)
@@ -20,6 +22,7 @@ import Infra.Db.Account (getAccountsByProvider)
 import Infra.Db.Activity (insertActivity, activityExistsForAccount)
 import Infra.Db.PollState (getPollStateForAccount, updatePollStateForAccount, ensurePollStateExists, PollState(..))
 import Infra.GitHub.Events (GitHubEvent(..), EventsResponse(..), listEvents, extractEventTitle)
+import Infra.GitHub.Commits (fetchCommitDiff, CommitWithDiff(..))
 
 -- | Build a NewActivity from a GitHubEvent
 buildActivityFromEvent :: EntityId -> GitHubEvent -> NewActivity
@@ -33,6 +36,67 @@ buildActivityFromEvent accId event = NewActivity
   , newActivityStartsAt = Just $ ghEventCreatedAt event
   , newActivityEndsAt = Nothing
   }
+
+-- | Enrich a PushEvent with commit diffs
+-- Returns the modified event with commits_with_diffs added to payload
+enrichPushEventWithDiffs :: Text -> GitHubEvent -> IO GitHubEvent
+enrichPushEventWithDiffs accessToken event
+  | ghEventType event /= "PushEvent" = pure event
+  | otherwise = do
+      let payload = ghEventPayload event
+          repoName = ghEventRepo event  -- format: "owner/repo"
+          (owner, repo) = splitRepoName repoName
+
+      -- Extract commits from payload
+      commits <- case payload of
+        Object obj -> case KM.lookup "commits" obj of
+          Just (Array arr) -> pure $ V.toList arr
+          _ -> pure []
+        _ -> pure []
+
+      -- Fetch diff for each commit
+      commitsWithDiffs <- mapM (fetchDiffForCommit owner repo accessToken) commits
+
+      -- Add commits_with_diffs to the payload
+      let enrichedPayload = case payload of
+            Object obj -> Object $ KM.insert "commits_with_diffs" (toJSON commitsWithDiffs) obj
+            other -> other
+
+      pure $ event { ghEventPayload = enrichedPayload }
+
+-- | Split "owner/repo" into (owner, repo)
+splitRepoName :: Text -> (Text, Text)
+splitRepoName name = case T.splitOn "/" name of
+  [owner, repo] -> (owner, repo)
+  _ -> (name, name)  -- fallback
+
+-- | Fetch diff for a single commit value
+fetchDiffForCommit :: Text -> Text -> Text -> Value -> IO CommitWithDiff
+fetchDiffForCommit owner repo token commitVal = do
+  let (sha, message, author) = extractCommitInfo commitVal
+      url = "https://github.com/" <> owner <> "/" <> repo <> "/commit/" <> sha
+
+  result <- fetchCommitDiff owner repo sha token
+  pure $ case result of
+    Right diff -> CommitWithDiff sha message author url (Just diff) Nothing
+    Left err -> CommitWithDiff sha message author url Nothing (Just err)
+
+-- | Extract commit info from a commit JSON value
+extractCommitInfo :: Value -> (Text, Text, Text)
+extractCommitInfo (Object obj) =
+  let sha = case KM.lookup "sha" obj of
+        Just (String s) -> s
+        _ -> ""
+      message = case KM.lookup "message" obj of
+        Just (String s) -> s
+        _ -> ""
+      author = case KM.lookup "author" obj of
+        Just (Object a) -> case KM.lookup "name" a of
+          Just (String n) -> n
+          _ -> ""
+        _ -> ""
+  in (sha, message, author)
+extractCommitInfo _ = ("", "", "")
 
 -- | Get access token from account details
 getAccessToken :: Account -> Maybe Text
