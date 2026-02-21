@@ -20,7 +20,7 @@ import Web.Scotty.Trans (ActionT, json, status, pathParam)
 import App.Monad (Env)
 import Domain.Id (EntityId(..))
 import Domain.Activity (Activity(..), ActivityStatus(..))
-import Infra.Db.Activity (getActivitiesByStatus, countActivitiesByStatus, getActivity, getActivitiesForToday, getTodaysCalendarEvents, updateActivityStatus)
+import Infra.Db.Activity (getActivitiesByStatus, countActivitiesByStatus, getActivity, getActivitiesForToday, getTodaysCalendarEvents, updateActivityStatus, getRecentActivities)
 import Infra.Db.Receipt (getReceiptsForActivity)
 import Services.Scheduler (runPollCycle)
 
@@ -31,6 +31,7 @@ activityToJson a = object
   , "account_id" .= unEntityId (activityAccountId a)
   , "source" .= activitySource a
   , "source_id" .= activitySourceId a
+  , "raw" .= activityRaw a
   , "status" .= activityStatus a
   , "title" .= activityTitle a
   , "summary" .= activitySummary a
@@ -44,18 +45,17 @@ activityToJson a = object
   , "autonomy_tier" .= activityAutonomyTier a
   , "confidence" .= activityConfidence a
   , "person_id" .= fmap unEntityId (activityPersonId a)
+  , "tags" .= activityTags a
   ]
 
 -- GET /activities
 getActivities :: ActionT (ReaderT Env IO) ()
 getActivities = do
-  -- Get recent pending activities (limited for response size)
-  activities <- lift $ getActivitiesByStatus Pending 50
-  -- Get true total count
-  totalCount <- lift $ countActivitiesByStatus Pending
+  -- Get recent activities from last 24 hours
+  activities <- lift $ getRecentActivities 24
   json $ object
     [ "activities" .= map activityToJson activities
-    , "count" .= totalCount
+    , "count" .= length activities
     ]
 
 -- GET /activities/stats - Get counts by status

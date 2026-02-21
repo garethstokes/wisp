@@ -1,6 +1,7 @@
 module Http.Handlers.Agents
   ( getAgentsList
   , getAgentByName
+  , getAgentSessions
   , postAgentActivateSkill
   , postAgentDeactivate
   ) where
@@ -21,6 +22,7 @@ import Domain.Agent (AgentConfig(..))
 import Domain.Soul (Soul(..))
 import Domain.Tenant (TenantId, Tenant(..))
 import Infra.Db.Tenant (getAllTenants)
+import Infra.Db.Session (getRecentSessions)
 
 --------------------------------------------------------------------------------
 -- Tenant resolution (TODO: get from auth token)
@@ -96,6 +98,16 @@ instance FromJSON ActivateSkillRequest where
 
 instance ToJSON ActivateSkillRequest where
   toJSON req = object ["confirm" .= activateConfirm req]
+
+-- | GET /api/agents/:name/sessions - get recent sessions
+getAgentSessions :: ActionT (ReaderT Env IO) ()
+getAgentSessions = withTenant $ \_ -> do
+  name <- captureParam "name"
+  sessions <- lift $ getRecentSessions name 10
+  json $ object
+    [ "sessions" .= sessions
+    , "count" .= length sessions
+    ]
 
 -- | POST /api/agents/:name/activate/:skill - activate a skill
 postAgentActivateSkill :: ActionT (ReaderT Env IO) ()

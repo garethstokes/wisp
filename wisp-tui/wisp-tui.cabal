@@ -17,10 +17,13 @@ executable wisp-tui
         Tui.DataLoader
         Tui.Types
         Tui.Views.Activities
+        Tui.Views.Agents
         Tui.Views.Approvals
         Tui.Views.Chat
-        Tui.Views.Documents
+        Tui.Views.Knowledge
+        Tui.Views.Skills
         Tui.Widgets.Layout
+        Tui.Widgets.Scroll
     hs-source-dirs:   app, src
     default-language: GHC2021
     default-extensions:

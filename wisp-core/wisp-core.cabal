@@ -27,6 +27,7 @@ library
         base >=4.17 && <5,
         text,
         aeson,
+        aeson-pretty,
         bytestring,
         time,
         http-client,

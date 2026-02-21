@@ -3,21 +3,25 @@
 -- Agents are defined by activities with "agent:NAME" tags.
 module Agents.Dispatcher
   ( dispatchChat
+  , dispatchChatStreaming
   , listAgentNamesByTenant
   ) where
 
+import Control.Monad.IO.Class (liftIO)
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8, decodeUtf8)
+import Data.Time.Clock (diffUTCTime, getCurrentTime)
 import Domain.Agent (AgentName, parseAgentTag)
 import Domain.Chat (ChatMessage(..), ChatResponse(..))
+import Domain.ChatEvent (ChatEvent(..), ToolCallInfo(..), ToolResultInfo(..))
 import Domain.Tenant (TenantId)
 import Domain.Id (EntityId)
 import App.Monad (App)
 import Agents.Core (Agent(..), loadAgentByTenant, buildSystemPrompt, loadSkillPromptByTenant, executeTool, ToolExecutionResult(..))
 import Agents.Run (RunContext, withRunLogging, callClaudeLogged, logToolRequest, logToolSuccess, logToolFailure)
 import Infra.Db.Activity (searchTagsByTenant)
-import Skills.Registry (Skill(..))
+import qualified Skills.Registry as SkillsRegistry
 import Data.Aeson (Value, decode, encode)
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KM
@@ -29,21 +33,35 @@ import qualified Data.ByteString.Lazy as BL
 -- mTimezone: Optional IANA timezone for date/time formatting in tools
 dispatchChat :: TenantId -> EntityId -> Text -> [ChatMessage] -> Maybe Text -> App (Either Text ChatResponse)
 dispatchChat tenantId accountId agentName msgs mTimezone = do
+  dispatchChatStreaming tenantId accountId agentName msgs mTimezone Nothing (\_ -> pure ())
+
+-- | Dispatch chat to an agent with optional streaming callbacks.
+-- The callback is invoked for tool-call lifecycle events while the agent runs.
+dispatchChatStreaming
+  :: TenantId
+  -> EntityId
+  -> Text
+  -> [ChatMessage]
+  -> Maybe Text
+  -> Maybe Text                 -- ^ Optional session id for run logging
+  -> (ChatEvent -> IO ())       -- ^ Stream callback
+  -> App (Either Text ChatResponse)
+dispatchChatStreaming tenantId accountId agentName msgs mTimezone mSessionId emit = do
   -- Load the agent from knowledge
   mAgent <- loadAgentByTenant tenantId agentName
   case mAgent of
     Nothing -> pure $ Left $ "Unknown agent: " <> agentName
-    Just agent -> withRunLogging agentName Nothing msgs $ \ctx messages -> do
+    Just agent -> withRunLogging agentName mSessionId msgs $ \ctx messages -> do
       -- Load skill prompt if skill is active
       mSkillPrompt <- case agentSkill agent of
         Nothing -> pure Nothing
-        Just skill -> loadSkillPromptByTenant tenantId (Skills.Registry.skillName skill)
+        Just skill -> loadSkillPromptByTenant tenantId (SkillsRegistry.skillName skill)
 
       -- Build the system prompt
       let systemPrompt = buildSystemPrompt agent mSkillPrompt
 
       -- Run the agentic loop
-      runAgentLoop ctx agent accountId systemPrompt messages [] mTimezone
+      runAgentLoop ctx agent accountId systemPrompt messages [] mTimezone emit
 
 -- | Agentic loop: call LLM, execute tools, feed results back, repeat until done
 runAgentLoop
@@ -54,8 +72,9 @@ runAgentLoop
   -> [ChatMessage]           -- Original conversation
   -> [(Text, Value, Value)]  -- Accumulated tool results: (toolName, args, result)
   -> Maybe Text              -- Timezone
+  -> (ChatEvent -> IO ())    -- Stream callback
   -> App (Either Text ChatResponse)
-runAgentLoop ctx agent accountId systemPrompt messages prevToolResults mTimezone = do
+runAgentLoop ctx agent accountId systemPrompt messages prevToolResults mTimezone emit = do
   -- Build user prompt including any tool results
   let userPrompt = formatMessagesWithTools messages prevToolResults
 
@@ -82,14 +101,14 @@ runAgentLoop ctx agent accountId systemPrompt messages prevToolResults mTimezone
                 }
             tools -> do
               -- Execute all tools
-              toolResults <- mapM (executeToolLogged ctx agent accountId mTimezone) tools
+              toolResults <- mapM (executeToolLogged ctx agent accountId mTimezone emit) tools
               -- Check for permission requests or errors
               case findBlocker toolResults of
                 Just blocker -> pure $ Right blocker
                 Nothing -> do
                   -- Continue loop with tool results
                   let newResults = [(name, args, res) | (name, args, ToolExecSuccess res) <- toolResults]
-                  runAgentLoop ctx agent accountId systemPrompt messages newResults mTimezone
+                  runAgentLoop ctx agent accountId systemPrompt messages newResults mTimezone emit
 
 -- | Execute a tool and log it
 executeToolLogged
@@ -97,15 +116,41 @@ executeToolLogged
   -> Agent
   -> EntityId
   -> Maybe Text
+  -> (ChatEvent -> IO ())    -- Stream callback
   -> (Text, Value)  -- (toolName, args)
   -> App (Text, Value, ToolExecutionResult)
-executeToolLogged ctx agent accountId mTimezone (toolName, toolArgs) = do
+executeToolLogged ctx agent accountId mTimezone emit (toolName, toolArgs) = do
+  liftIO $ emit $ ToolCallStartEvent $ ToolCallInfo
+    { toolCallName = toolName
+    , toolCallArgs = toolArgs
+    }
+  start <- liftIO getCurrentTime
   _ <- logToolRequest ctx toolName toolArgs
   toolResult <- executeTool agent accountId toolName toolArgs mTimezone
+  end <- liftIO getCurrentTime
+  let durationMs = max 0 $ floor (realToFrac (diffUTCTime end start) * (1000 :: Double))
   case toolResult of
-    ToolExecSuccess val -> logToolSuccess ctx toolName val
-    ToolExecError err -> logToolFailure ctx toolName err
-    ToolExecPermission _ _ -> pure ()  -- Don't log permissions as success/failure
+    ToolExecSuccess val -> do
+      logToolSuccess ctx toolName val
+      liftIO $ emit $ ToolCallResultEvent $ ToolResultInfo
+        { toolResultName = toolName
+        , toolResultValue = Aeson.Null
+        , toolResultDurationMs = durationMs
+        }
+    ToolExecError err -> do
+      logToolFailure ctx toolName err
+      liftIO $ emit $ ToolCallResultEvent $ ToolResultInfo
+        { toolResultName = toolName
+        , toolResultValue = Aeson.Null
+        , toolResultDurationMs = durationMs
+        }
+    ToolExecPermission _ _ -> do
+      -- Don't log permissions as success/failure, but do emit timing info.
+      liftIO $ emit $ ToolCallResultEvent $ ToolResultInfo
+        { toolResultName = toolName
+        , toolResultValue = Aeson.Null
+        , toolResultDurationMs = durationMs
+        }
   pure (toolName, toolArgs, toolResult)
 
 -- | Find any blocker (error or permission request) in tool results

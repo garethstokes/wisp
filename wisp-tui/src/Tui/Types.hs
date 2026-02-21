@@ -5,16 +5,21 @@ module Tui.Types
   , ChatState(..)
   , ChatMessage(..)
   , ActivitiesState(..)
-  , DocumentsState(..)
+  , KnowledgeState(..)
+  , SkillsState(..)
+  , AgentsState(..)
   , ApprovalsState(..)
-  , DocumentTab(..)
+  , KnowledgeTab(..)
   , Name(..)
   , AppEvent(..)
+  , StatusSeverity(..)
   -- Lenses
   , currentView
   , chatState
   , activitiesState
-  , documentsState
+  , knowledgeState
+  , skillsState
+  , agentsState
   , approvalsState
   , statusMessage
   , clientConfig
@@ -30,23 +35,34 @@ module Tui.Types
   , asSelected
   , asExpanded
   , asFilter
-  -- Documents lenses
-  , dsCurrentTab
-  , dsProjects
-  , dsNotes
-  , dsPrefs
-  , dsSelected
+  -- Knowledge lenses
+  , ksCurrentTab
+  , ksNotes
+  , ksPrefs
+  , ksSelected
+  , ksExpanded
+  -- Skills lenses
+  , ssSkills
+  , ssSelected
+  , ssExpanded
+  -- Agents lenses
+  , agsAgents
+  , agsSelected
+  , agsExpanded
+  , agsSessions
   -- Approvals lenses
   , apsItems
   , apsSelected
   , apsExpanded
+  -- Time lens
+  , currentTime
   ) where
 
 import Data.Text (Text)
 import Data.Time (UTCTime)
 import Lens.Micro.TH (makeLenses)
 
-import Wisp.Client (ClientConfig, Activity, Document)
+import Wisp.Client (ClientConfig, Activity, Document, Skill, AgentInfo, SessionSummary)
 import Wisp.Client.SSE (ChatEvent)
 
 -- | Resource names for brick
@@ -54,23 +70,41 @@ data Name
   = ChatInput
   | ChatHistory
   | ActivityList
-  | DocumentList
+  | ActivityDetail  -- Separate viewport for activity detail view
+  | KnowledgeList
+  | KnowledgeDetail
+  | SkillsList
+  | SkillsDetail
+  | AgentsList
+  | AgentsDetail
   | ApprovalList
+  | ApprovalDetail  -- Separate viewport for approval detail view
   deriving (Show, Eq, Ord)
 
 -- | Custom events
 data AppEvent
   = ChatEventReceived ChatEvent
+  | ActivitiesLoaded [Activity]
+  | KnowledgeLoaded [Document] [Document]  -- notes, prefs
+  | SkillsLoaded [Skill]
+  | AgentsLoaded [AgentInfo]
+  | AgentSessionsLoaded Text [SessionSummary]  -- agent name, sessions
+  | ApprovalsLoaded [(Activity, Text, Text)]
+  | LoadError Text
   | RefreshView View
   | Tick
   deriving (Show, Eq)
 
+-- | Status message severity
+data StatusSeverity = StatusInfo | StatusError
+  deriving (Show, Eq)
+
 -- | Main views
-data View = ChatView | ActivitiesView | DocumentsView | ApprovalsView
+data View = ChatView | ActivitiesView | KnowledgeView | SkillsView | AgentsView | ApprovalsView
   deriving (Show, Eq, Ord, Enum, Bounded)
 
--- | Document sub-tabs
-data DocumentTab = ProjectsTab | NotesTab | PrefsTab
+-- | Knowledge sub-tabs
+data KnowledgeTab = NotesTab | PrefsTab
   deriving (Show, Eq, Ord, Enum, Bounded)
 
 -- | Chat message for display
@@ -102,16 +136,35 @@ data ActivitiesState = ActivitiesState
 
 makeLenses ''ActivitiesState
 
--- | Documents view state
-data DocumentsState = DocumentsState
-  { _dsCurrentTab :: DocumentTab
-  , _dsProjects :: [Document]
-  , _dsNotes :: [Document]
-  , _dsPrefs :: [Document]
-  , _dsSelected :: Int
+-- | Knowledge view state (renamed from Documents)
+data KnowledgeState = KnowledgeState
+  { _ksCurrentTab :: KnowledgeTab
+  , _ksNotes :: [Document]
+  , _ksPrefs :: [Document]
+  , _ksSelected :: Int
+  , _ksExpanded :: Maybe Int
   } deriving (Show)
 
-makeLenses ''DocumentsState
+makeLenses ''KnowledgeState
+
+-- | Skills view state
+data SkillsState = SkillsState
+  { _ssSkills :: [Skill]
+  , _ssSelected :: Int
+  , _ssExpanded :: Maybe Int
+  } deriving (Show)
+
+makeLenses ''SkillsState
+
+-- | Agents view state
+data AgentsState = AgentsState
+  { _agsAgents :: [AgentInfo]
+  , _agsSelected :: Int
+  , _agsExpanded :: Maybe Int
+  , _agsSessions :: [SessionSummary]  -- Sessions for currently expanded agent
+  } deriving (Show)
+
+makeLenses ''AgentsState
 
 -- | Approvals view state
 data ApprovalsState = ApprovalsState
@@ -127,10 +180,13 @@ data AppState = AppState
   { _currentView :: View
   , _chatState :: ChatState
   , _activitiesState :: ActivitiesState
-  , _documentsState :: DocumentsState
+  , _knowledgeState :: KnowledgeState
+  , _skillsState :: SkillsState
+  , _agentsState :: AgentsState
   , _approvalsState :: ApprovalsState
   , _clientConfig :: ClientConfig
-  , _statusMessage :: Maybe (Text, UTCTime)
+  , _statusMessage :: Maybe (Text, UTCTime, StatusSeverity)
+  , _currentTime :: Maybe UTCTime
   }
 
 makeLenses ''AppState

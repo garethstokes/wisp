@@ -9,14 +9,14 @@ import Brick.BChan (BChan, writeBChan)
 import Brick.Widgets.Border (hBorder)
 import Control.Concurrent.Async (async)
 import Control.Monad (void)
-import Data.Time (getCurrentTime)
+import Data.Aeson (Value, object, (.=))
 import qualified Graphics.Vty as V
 import Data.Text (Text)
 import qualified Data.Text as T
-import Lens.Micro ((^.), (.~), (%~))
+import Lens.Micro ((^.), (%~))
 
 import Tui.Types
-import Wisp.Client (ClientConfig)
+import Wisp.Client (ClientConfig, ClientError(..))
 import Wisp.Client.SSE (streamChat, ChatRequest(..), ChatEvent(..))
 
 -- | Chat view widget
@@ -77,12 +77,34 @@ handleChatEvent (V.EvKey (V.KChar c) []) = do
 handleChatEvent _ = pure ()
 
 -- | Send a chat message and stream responses
-sendChatMessage :: ClientConfig -> Text -> Text -> Text -> BChan AppEvent -> IO ()
-sendChatMessage cfg agent session msg chan = void $ async $ do
-  let req = ChatRequest agent msg session
-  _ <- streamChat cfg req $ \evt -> do
-    writeBChan chan (ChatEventReceived (toAppEvent evt))
-  pure ()
+sendChatMessage :: ClientConfig -> Text -> Text -> [ChatMessage] -> BChan AppEvent -> IO ()
+sendChatMessage cfg agent session messages chan = void $ async $ do
+  let req = ChatRequest
+        { chatAgent = agent
+        , chatMessages = map messageToJson messages
+        , chatSession = Just session
+        , chatTimezone = Nothing
+        }
+  result <- streamChat cfg req $ \evt ->
+    writeBChan chan (ChatEventReceived evt)
+  case result of
+    Left err ->
+      writeBChan chan (ChatEventReceived (ErrorEvent (renderClientError err) "client_error"))
+    Right () -> pure ()
   where
-    toAppEvent :: ChatEvent -> Wisp.Client.SSE.ChatEvent
-    toAppEvent = id
+    messageToJson :: ChatMessage -> Value
+    messageToJson m = object
+      [ "role" .= normalizeRole (cmRole m)
+      , "content" .= cmContent m
+      ]
+
+    normalizeRole :: Text -> Text
+    normalizeRole "You" = "user"
+    normalizeRole "Assistant" = "assistant"
+    normalizeRole other = other
+
+    renderClientError :: ClientError -> Text
+    renderClientError = \case
+      HttpError msg -> "HTTP error: " <> msg
+      ParseError msg -> "Parse error: " <> msg
+      ServerError code msg -> "Server error (" <> T.pack (show code) <> "): " <> msg

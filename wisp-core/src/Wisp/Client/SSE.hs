@@ -5,7 +5,7 @@ module Wisp.Client.SSE
   ) where
 
 import Control.Exception (try, SomeException)
-import Data.Aeson (ToJSON(..), encode, object, (.=))
+import Data.Aeson (ToJSON(..), Value, encode, object, (.=))
 import qualified Data.ByteString as BS
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -18,16 +18,19 @@ import Wisp.Client.Types
 -- | Request to send a chat message
 data ChatRequest = ChatRequest
   { chatAgent :: Text
-  , chatMessage :: Text
-  , chatSession :: Text
+  , chatMessages :: [Value]
+  , chatSession :: Maybe Text
+  , chatTimezone :: Maybe Text
   } deriving (Show, Eq)
 
 instance ToJSON ChatRequest where
-  toJSON r = object
-    [ "agent" .= chatAgent r
-    , "messages" .= [object ["role" .= ("user" :: Text), "content" .= chatMessage r]]
-    , "session" .= chatSession r
-    ]
+  toJSON r =
+    object $
+      [ "agent" .= chatAgent r
+      , "messages" .= chatMessages r
+      ]
+        <> maybe [] (\sid -> ["session" .= sid]) (chatSession r)
+        <> maybe [] (\tz -> ["timezone" .= tz]) (chatTimezone r)
 
 -- | Events received from SSE stream
 data ChatEvent
@@ -45,7 +48,11 @@ streamChat
   -> (ChatEvent -> IO ())  -- Callback for each event
   -> IO (Either ClientError ())
 streamChat cfg req callback = do
-  manager <- newManager defaultManagerSettings
+  -- Use longer timeout for SSE (5 minutes) since LLM calls can be slow
+  let settings = defaultManagerSettings
+        { managerResponseTimeout = responseTimeoutMicro (5 * 60 * 1000000)
+        }
+  manager <- newManager settings
   result <- try $ do
     initialReq <- parseRequest $ T.unpack (configBaseUrl cfg) <> "/api/chat/stream"
     let httpReq = initialReq

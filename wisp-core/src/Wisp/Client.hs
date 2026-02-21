@@ -14,6 +14,11 @@ module Wisp.Client
   , dismissActivity
   , getApprovals
   , ApprovalItem(..)
+    -- * Skills and Agents
+  , getSkills
+  , getAgents
+  , getAgent
+  , getAgentSessions
     -- * Re-exports
   , module Wisp.Client.Types
   , module Wisp.Client.Activities
@@ -95,7 +100,7 @@ httpPost_ cfg path body = do
 -- Activities
 getActivities :: ClientConfig -> IO (Either ClientError [Activity])
 getActivities cfg = do
-  result <- httpGet cfg "/api/activities"
+  result <- httpGet cfg "/activities"
   pure $ case result of
     Left e -> Left e
     Right val -> case val of
@@ -107,7 +112,7 @@ getActivities cfg = do
       _ -> Left $ ParseError "Expected object"
 
 getActivity :: ClientConfig -> Text -> IO (Either ClientError Activity)
-getActivity cfg aid = httpGet cfg $ "/api/activities/" <> T.unpack aid
+getActivity cfg aid = httpGet cfg $ "/activities/" <> T.unpack aid
 
 -- Documents
 getDocuments :: ClientConfig -> DocumentType -> IO (Either ClientError [Document])
@@ -195,19 +200,20 @@ instance FromJSON ApprovalItem where
 
 getApprovals :: ClientConfig -> IO (Either ClientError [ApprovalItem])
 getApprovals cfg = do
-  -- Fetch both quarantined and review items, combine them
+  -- Fetch inbox items that need attention
   result <- httpGet cfg "/inbox"
   pure $ case result of
     Left e -> Left e
     Right (Aeson.Object obj) -> Right $ concat
       [ extractItems "quarantine" "quarantined" obj
-      , extractItems "classify" "review" obj
+      , extractItems "high_urgency" "high_urgency" obj
+      , extractItems "surfaced" "surfaced" obj
       ]
     Right _ -> Left $ ParseError "Expected object"
   where
     extractItems aType key obj = case KM.lookup key obj of
       Just (Aeson.Array arr) ->
-        [ ApprovalItem act aType "needs review"
+        [ ApprovalItem act aType "needs attention"
         | Aeson.Object actObj <- toList arr
         , Aeson.Success act <- [Aeson.fromJSON (Aeson.Object actObj)]
         ]
@@ -215,11 +221,54 @@ getApprovals cfg = do
 
 approveActivity :: ClientConfig -> Text -> IO (Either ClientError ())
 approveActivity cfg aid =
-  httpPost_ cfg ("/api/activities/" <> T.unpack aid <> "/approve") (object [])
+  httpPost_ cfg ("/activities/" <> T.unpack aid <> "/approve") (object [])
 
 dismissActivity :: ClientConfig -> Text -> IO (Either ClientError ())
 dismissActivity cfg aid =
-  httpPost_ cfg ("/api/activities/" <> T.unpack aid <> "/dismiss") (object [])
+  httpPost_ cfg ("/activities/" <> T.unpack aid <> "/dismiss") (object [])
+
+-- Skills
+getSkills :: ClientConfig -> IO (Either ClientError [Skill])
+getSkills cfg = do
+  result <- httpGet cfg "/api/skills"
+  pure $ case result of
+    Left e -> Left e
+    Right val -> case val of
+      Aeson.Object obj -> case KM.lookup "skills" obj of
+        Just (Aeson.Array arr) -> case traverse Aeson.fromJSON arr of
+          Aeson.Success skills -> Right $ toList skills
+          _ -> Left $ ParseError "Failed to parse skills"
+        _ -> Left $ ParseError "Missing skills key"
+      _ -> Left $ ParseError "Expected object"
+
+-- Agents
+getAgents :: ClientConfig -> IO (Either ClientError [Text])
+getAgents cfg = do
+  result <- httpGet cfg "/api/agents"
+  pure $ case result of
+    Left e -> Left e
+    Right val -> case val of
+      Aeson.Object obj -> case KM.lookup "agents" obj of
+        Just (Aeson.Array arr) -> Right
+          [ name | Aeson.String name <- toList arr ]
+        _ -> Left $ ParseError "Missing agents key"
+      _ -> Left $ ParseError "Expected object"
+
+getAgent :: ClientConfig -> Text -> IO (Either ClientError AgentInfo)
+getAgent cfg name = httpGet cfg $ "/api/agents/" <> T.unpack name
+
+getAgentSessions :: ClientConfig -> Text -> IO (Either ClientError [SessionSummary])
+getAgentSessions cfg name = do
+  result <- httpGet cfg $ "/api/agents/" <> T.unpack name <> "/sessions"
+  pure $ case result of
+    Left e -> Left e
+    Right val -> case val of
+      Aeson.Object obj -> case KM.lookup "sessions" obj of
+        Just (Aeson.Array arr) -> case traverse Aeson.fromJSON arr of
+          Aeson.Success sessions -> Right $ toList sessions
+          _ -> Left $ ParseError "Failed to parse sessions"
+        _ -> Left $ ParseError "Missing sessions key"
+      _ -> Left $ ParseError "Expected object"
 
 -- Helper
 toList :: Foldable t => t a -> [a]

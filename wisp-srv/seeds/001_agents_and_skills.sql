@@ -44,6 +44,63 @@ BEGIN
     tags = EXCLUDED.tags,
     tenant_id = EXCLUDED.tenant_id;
 
+  -- Seed skill-bound agents (to match CLI/TUI defaults)
+  -- These are separate agent personas with a default active_skill set.
+
+  INSERT INTO activities (id, account_id, tenant_id, source, source_id, raw, title, status, tags, created_at)
+  VALUES (
+    'seed-agent-wisp-concierge',
+    v_account_id,
+    v_tenant_id,
+    'note',
+    'seed-agent-wisp-concierge',
+    '{"personality_seed": "Helpful, concise, and proactive. You anticipate needs and offer actionable suggestions.", "active_skill": "concierge"}',
+    'Wisp - Concierge',
+    'processed',
+    ARRAY['agent:wisp/concierge'],
+    NOW()
+  ) ON CONFLICT (account_id, source, source_id) DO UPDATE SET
+    raw = EXCLUDED.raw,
+    title = EXCLUDED.title,
+    tags = EXCLUDED.tags,
+    tenant_id = EXCLUDED.tenant_id;
+
+  INSERT INTO activities (id, account_id, tenant_id, source, source_id, raw, title, status, tags, created_at)
+  VALUES (
+    'seed-agent-wisp-scheduler',
+    v_account_id,
+    v_tenant_id,
+    'note',
+    'seed-agent-wisp-scheduler',
+    '{"personality_seed": "Helpful, concise, and proactive. You anticipate needs and offer actionable suggestions.", "active_skill": "scheduler"}',
+    'Wisp - Scheduler',
+    'processed',
+    ARRAY['agent:wisp/scheduler'],
+    NOW()
+  ) ON CONFLICT (account_id, source, source_id) DO UPDATE SET
+    raw = EXCLUDED.raw,
+    title = EXCLUDED.title,
+    tags = EXCLUDED.tags,
+    tenant_id = EXCLUDED.tenant_id;
+
+  INSERT INTO activities (id, account_id, tenant_id, source, source_id, raw, title, status, tags, created_at)
+  VALUES (
+    'seed-agent-wisp-insights',
+    v_account_id,
+    v_tenant_id,
+    'note',
+    'seed-agent-wisp-insights',
+    '{"personality_seed": "Helpful, concise, and proactive. You anticipate needs and offer actionable suggestions.", "active_skill": "insights"}',
+    'Wisp - Insights',
+    'processed',
+    ARRAY['agent:wisp/insights'],
+    NOW()
+  ) ON CONFLICT (account_id, source, source_id) DO UPDATE SET
+    raw = EXCLUDED.raw,
+    title = EXCLUDED.title,
+    tags = EXCLUDED.tags,
+    tenant_id = EXCLUDED.tenant_id;
+
   -- Seed concierge skill prompt
   INSERT INTO activities (id, account_id, tenant_id, source, source_id, raw, title, status, tags, created_at)
   VALUES (

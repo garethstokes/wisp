@@ -2,63 +2,84 @@ module Http.Handlers.ChatStream
   ( postChatStream
   ) where
 
-import Control.Concurrent.STM
-import Control.Monad.Reader (ReaderT)
+import Control.Exception (SomeException, try)
+import Control.Monad.Reader (ReaderT, ask, runReaderT)
+import Control.Monad.IO.Class (liftIO)
 import Control.Monad.Trans.Class (lift)
-import Data.Aeson (object, (.=))
+import Data.Aeson (Value)
+import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.KeyMap as KM
+import qualified Data.ByteString.Builder as BB
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
-import Network.HTTP.Types.Status (status200, status500)
-import Web.Scotty.Trans (ActionT, json, status, jsonData, setHeader, raw)
+import qualified Data.Text as T
+import Network.HTTP.Types.Status (status200)
+import Web.Scotty.Trans (ActionT, jsonData, setHeader, status, stream)
 import App.Monad (Env)
-import Domain.Chat (ChatRequest(..))
+import Agents.Dispatcher (dispatchChatStreaming)
+import Domain.Account (Account(..))
+import Domain.Chat (ChatRequest(..), ChatResponse(..))
 import Domain.ChatEvent (ChatEvent(..), chatEventToSSE)
+import Domain.Tenant (Tenant(..))
 import Infra.Db.Tenant (getAllTenants)
 import Infra.Db.Account (getAllAccounts)
 
 -- | POST /api/chat/stream - SSE streaming chat
 postChatStream :: ActionT (ReaderT Env IO) ()
 postChatStream = do
-  _req <- jsonData :: ActionT (ReaderT Env IO) ChatRequest
+  reqValue <- jsonData :: ActionT (ReaderT Env IO) Value
+  let mSessionId = extractSessionId reqValue
 
-  -- Get tenant and account (same as regular chat)
-  tenants <- lift getAllTenants
-  accounts <- lift getAllAccounts
+  status status200
+  setHeader "Content-Type" "text/event-stream"
+  setHeader "Cache-Control" "no-cache"
+  setHeader "Connection" "keep-alive"
+  setHeader "X-Accel-Buffering" "no"
+
+  env <- lift ask
+  stream $ \write flush -> do
+    -- Emit a comment immediately to flush headers and keep connection alive
+    write $ BB.byteString ": stream started\n\n"
+    flush
+
+    let emit :: ChatEvent -> IO ()
+        emit evt = do
+          write $ BB.lazyByteString $ chatEventToSSE evt
+          flush
+
+    case Aeson.fromJSON reqValue of
+      Aeson.Error err -> do
+        emit $ ErrorEvent (T.pack err) "invalid_request"
+      Aeson.Success req -> do
+        result <- try $ runReaderT (runChat req mSessionId emit) env
+        case result of
+          Left (e :: SomeException) ->
+            emit $ ErrorEvent (T.pack (show e)) "exception"
+          Right () -> pure ()
+
+runChat :: ChatRequest -> Maybe Text -> (ChatEvent -> IO ()) -> ReaderT Env IO ()
+runChat req mSessionId emit = do
+  tenants <- getAllTenants
+  accounts <- getAllAccounts
 
   case (tenants, accounts) of
-    ([], _) -> do
-      status status500
-      json $ object ["error" .= ("No tenant configured" :: Text)]
-    (_, []) -> do
-      status status500
-      json $ object ["error" .= ("No accounts configured" :: Text)]
+    ([], _) -> liftIO $ emit $ ErrorEvent "No tenant configured. Create one with: wisp tenant create <name>" "no_tenant"
+    (_, []) -> liftIO $ emit $ ErrorEvent "No accounts configured. Run: wisp auth" "no_accounts"
     (t:_, a:_) -> do
-      -- Set up SSE headers
-      status status200
-      setHeader "Content-Type" "text/event-stream"
-      setHeader "Cache-Control" "no-cache"
-      setHeader "Connection" "keep-alive"
+      let agentName = chatAgent req
+          messages = chatMessages req
+          tz = chatTimezone req
 
-      -- Create event channel
-      chan <- lift $ liftIO newTChanIO
+      result <- dispatchChatStreaming (tenantId t) (accountId a) agentName messages tz mSessionId emit
+      case result of
+        Left err -> liftIO $ emit $ ErrorEvent err "chat_failed"
+        Right resp -> do
+          liftIO $ emit $ ChunkEvent (responseMessage resp)
+          liftIO $ emit $ DoneEvent (fromMaybe "default" mSessionId) 0
 
-      -- TODO: Fork agent execution that writes to chan
-      -- For now, send a simple response to verify SSE works
-      lift $ liftIO $ atomically $ do
-        writeTChan chan $ ChunkEvent "Hello from SSE! "
-        writeTChan chan $ ChunkEvent "Streaming works."
-        writeTChan chan $ DoneEvent "test-session" 10
-
-      -- Stream events from channel
-      let streamEvents = do
-            evt <- lift $ liftIO $ atomically $ readTChan chan
-            raw $ chatEventToSSE evt
-            case evt of
-              DoneEvent _ _ -> pure ()
-              ErrorEvent _ _ -> pure ()
-              _ -> streamEvents
-
-      streamEvents
-
--- Helper to lift IO into the monad stack
-liftIO :: IO a -> ReaderT Env IO a
-liftIO = lift
+extractSessionId :: Value -> Maybe Text
+extractSessionId (Aeson.Object obj) =
+  case KM.lookup "session" obj of
+    Just (Aeson.String s) -> Just s
+    _ -> Nothing
+extractSessionId _ = Nothing

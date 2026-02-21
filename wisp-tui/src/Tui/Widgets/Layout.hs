@@ -2,6 +2,7 @@ module Tui.Widgets.Layout
   ( headerWidget
   , statusBarWidget
   , viewTabName
+  , errorAttr
   ) where
 
 import Brick
@@ -13,7 +14,9 @@ import Tui.Types
 viewTabName :: View -> Text
 viewTabName ChatView = "Chat"
 viewTabName ActivitiesView = "Activities"
-viewTabName DocumentsView = "Documents"
+viewTabName KnowledgeView = "Knowledge"
+viewTabName SkillsView = "Skills"
+viewTabName AgentsView = "Agents"
 viewTabName ApprovalsView = "Approvals"
 
 -- | Header with tabs
@@ -35,15 +38,19 @@ tabsWidget current = hBox $ map (renderTab current) [minBound..maxBound]
 selectedTabAttr :: AttrName
 selectedTabAttr = attrName "selectedTab"
 
--- | Status bar
-statusBarWidget :: Maybe Text -> Widget Name
+-- | Status bar with severity-based styling
+statusBarWidget :: Maybe (Text, StatusSeverity) -> Widget Name
 statusBarWidget mStatus = vLimit 1 $ hBox
   [ withAttr connectedAttr $ txt " Connected"
   , txt " | "
   , case mStatus of
-      Just msg -> txt msg
-      Nothing -> txt "Tab:switch views  ?:help  q:quit"
+      Just (msg, StatusError) -> withAttr errorAttr $ txt $ "Error: " <> msg
+      Just (msg, StatusInfo) -> txt msg
+      Nothing -> txt "Tab:switch views  ?:help  Ctrl-Q:quit"
   ]
 
 connectedAttr :: AttrName
 connectedAttr = attrName "connected"
+
+errorAttr :: AttrName
+errorAttr = attrName "error"
