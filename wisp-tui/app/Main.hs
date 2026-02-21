@@ -16,7 +16,7 @@ import Lens.Micro ((%~), (^.), (.~))
 import qualified Tui.DataLoader as DL
 import Wisp.Client.SSE (ChatEvent(..))
 import Tui.Types
-import Tui.Views.Activities (activitiesWidget, handleActivitiesEvent)
+import Tui.Views.Activities (activitiesWidget, handleActivitiesEvent, handleActivitiesEventWithAction, ActivitiesAction(..))
 import Tui.Views.Agents (agentsWidget, handleAgentsEvent)
 import Tui.Views.Approvals (approvalsWidget, handleApprovalsEvent)
 import Tui.Views.Chat (chatWidget, handleChatEvent, sendChatMessage)
@@ -47,7 +47,7 @@ main = do
             , _csStreaming = False
             , _csStreamBuffer = ""
             }
-        , _activitiesState = ActivitiesState [] 0 Nothing ""
+        , _activitiesState = ActivitiesState [] 0 Nothing "" Nothing True False
         , _knowledgeState = KnowledgeState NotesTab [] [] 0 Nothing
         , _skillsState = SkillsState [] 0 Nothing
         , _agentsState = AgentsState [] 0 Nothing []
@@ -117,9 +117,16 @@ handleEvent chan (VtyEvent (V.EvKey (V.KChar 'r') [])) = do
   case s ^. currentView of
     ChatView -> handleChatEvent (V.EvKey (V.KChar 'r') [])
     _ -> triggerDataLoad chan
-handleEvent _ (AppEvent (ActivitiesLoaded acts)) = do
+handleEvent _ (AppEvent (ActivitiesLoaded acts metrics hasMore)) = do
   modify $ activitiesState . asActivities .~ acts
   modify $ activitiesState . asSelected .~ 0
+  modify $ activitiesState . asMetrics .~ metrics
+  modify $ activitiesState . asHasMore .~ hasMore
+  modify $ activitiesState . asLoading .~ False
+handleEvent _ (AppEvent (ActivitiesAppended acts hasMore)) = do
+  modify $ activitiesState . asActivities %~ (++ acts)
+  modify $ activitiesState . asHasMore .~ hasMore
+  modify $ activitiesState . asLoading .~ False
 handleEvent _ (AppEvent (KnowledgeLoaded notes prefs)) = do
   modify $ knowledgeState . ksNotes .~ notes
   modify $ knowledgeState . ksPrefs .~ prefs
@@ -155,11 +162,15 @@ handleEvent chan (VtyEvent (V.EvKey V.KEnter [])) = do
     SkillsView -> handleSkillsEvent (V.EvKey V.KEnter [])
     AgentsView -> handleAgentsEnter chan
     ApprovalsView -> handleApprovalsEvent (V.EvKey V.KEnter [])
-handleEvent _ (VtyEvent e) = do
+handleEvent chan (VtyEvent e) = do
   s <- get
   case s ^. currentView of
     ChatView -> handleChatEvent e
-    ActivitiesView -> handleActivitiesEvent e
+    ActivitiesView -> do
+      action <- handleActivitiesEventWithAction e
+      case action of
+        LoadMore -> triggerLoadMoreActivities chan
+        NoAction -> pure ()
     KnowledgeView -> handleKnowledgeEvent e
     SkillsView -> handleSkillsEvent e
     AgentsView -> handleAgentsEvent e
@@ -185,8 +196,10 @@ triggerDataLoad chan = do
 
     -- Send result back via channel
     case result of
-      DL.ActivitiesLoaded acts ->
-        writeBChan chan (ActivitiesLoaded acts)
+      DL.ActivitiesLoaded acts metrics hasMore ->
+        writeBChan chan (ActivitiesLoaded acts metrics hasMore)
+      DL.ActivitiesAppended acts hasMore ->
+        writeBChan chan (ActivitiesAppended acts hasMore)
       DL.KnowledgeLoaded notes prefs ->
         writeBChan chan (KnowledgeLoaded notes prefs)
       DL.SkillsLoaded skills ->
@@ -199,6 +212,21 @@ triggerDataLoad chan = do
         writeBChan chan (ApprovalsLoaded items)
       DL.LoadError msg ->
         writeBChan chan (LoadError msg)
+
+-- | Trigger loading more activities (pagination)
+triggerLoadMoreActivities :: BChan AppEvent -> EventM Name AppState ()
+triggerLoadMoreActivities chan = do
+  s <- get
+  let cfg = s ^. clientConfig
+      currentCount = length (s ^. activitiesState . asActivities)
+  void $ liftIO $ async $ do
+    result <- DL.loadMoreActivities cfg currentCount
+    case result of
+      DL.ActivitiesAppended acts hasMore ->
+        writeBChan chan (ActivitiesAppended acts hasMore)
+      DL.LoadError msg ->
+        writeBChan chan (LoadError msg)
+      _ -> pure ()
 
 nextView :: View -> View
 nextView ChatView = ActivitiesView

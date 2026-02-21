@@ -1,6 +1,8 @@
 module Wisp.Client
   ( -- * Client operations
     getActivities
+  , getActivitiesPage
+  , ActivitiesResponse(..)
   , getActivity
   , getDocuments
   , getProjects
@@ -97,16 +99,42 @@ httpPost_ cfg path body = do
          then pure $ Right ()
          else pure $ Left $ ServerError code $ T.pack $ show $ responseBody response
 
--- Activities
-getActivities :: ClientConfig -> IO (Either ClientError [Activity])
-getActivities cfg = do
-  result <- httpGet cfg "/activities"
+-- | Response from getActivities including both activities and metrics
+data ActivitiesResponse = ActivitiesResponse
+  { arActivities :: [Activity]
+  , arMetrics :: Maybe ActivityMetrics
+  , arHasMore :: Bool
+  , arOffset :: Int
+  } deriving (Show, Eq)
+
+-- Activities (first page)
+getActivities :: ClientConfig -> IO (Either ClientError ActivitiesResponse)
+getActivities cfg = getActivitiesPage cfg 50 0
+
+-- Activities with pagination
+getActivitiesPage :: ClientConfig -> Int -> Int -> IO (Either ClientError ActivitiesResponse)
+getActivitiesPage cfg limit offset = do
+  let path = "/activities?limit=" <> show limit <> "&offset=" <> show offset
+  result <- httpGet cfg path
   pure $ case result of
     Left e -> Left e
     Right val -> case val of
       Aeson.Object obj -> case KM.lookup "activities" obj of
         Just (Aeson.Array arr) -> case traverse Aeson.fromJSON arr of
-          Aeson.Success activities -> Right $ toList activities
+          Aeson.Success activities -> Right ActivitiesResponse
+            { arActivities = toList activities
+            , arMetrics = case KM.lookup "metrics" obj of
+                Just m -> case Aeson.fromJSON m of
+                  Aeson.Success metrics -> Just metrics
+                  _ -> Nothing
+                _ -> Nothing
+            , arHasMore = case KM.lookup "has_more" obj of
+                Just (Aeson.Bool b) -> b
+                _ -> False
+            , arOffset = case KM.lookup "offset" obj of
+                Just (Aeson.Number n) -> round n
+                _ -> 0
+            }
           _ -> Left $ ParseError "Failed to parse activities array"
         _ -> Left $ ParseError "Missing activities key"
       _ -> Left $ ParseError "Expected object"

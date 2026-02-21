@@ -35,6 +35,9 @@ module Tui.Types
   , asSelected
   , asExpanded
   , asFilter
+  , asMetrics
+  , asHasMore
+  , asLoading
   -- Knowledge lenses
   , ksCurrentTab
   , ksNotes
@@ -62,7 +65,7 @@ import Data.Text (Text)
 import Data.Time (UTCTime)
 import Lens.Micro.TH (makeLenses)
 
-import Wisp.Client (ClientConfig, Activity, Document, Skill, AgentInfo, SessionSummary)
+import Wisp.Client (ClientConfig, Activity, ActivityMetrics, Document, Skill, AgentInfo, SessionSummary)
 import Wisp.Client.SSE (ChatEvent)
 
 -- | Resource names for brick
@@ -84,7 +87,8 @@ data Name
 -- | Custom events
 data AppEvent
   = ChatEventReceived ChatEvent
-  | ActivitiesLoaded [Activity]
+  | ActivitiesLoaded [Activity] (Maybe ActivityMetrics) Bool  -- activities, metrics, hasMore
+  | ActivitiesAppended [Activity] Bool  -- more activities, hasMore
   | KnowledgeLoaded [Document] [Document]  -- notes, prefs
   | SkillsLoaded [Skill]
   | AgentsLoaded [AgentInfo]
@@ -132,6 +136,9 @@ data ActivitiesState = ActivitiesState
   , _asSelected :: Int
   , _asExpanded :: Maybe Int
   , _asFilter :: Text
+  , _asMetrics :: Maybe ActivityMetrics
+  , _asHasMore :: Bool
+  , _asLoading :: Bool
   } deriving (Show)
 
 makeLenses ''ActivitiesState

@@ -1,5 +1,6 @@
 module Tui.DataLoader
   ( loadActivities
+  , loadMoreActivities
   , loadKnowledge
   , loadSkills
   , loadAgents
@@ -14,12 +15,15 @@ import Wisp.Client
   ( ClientConfig
   , ClientError(..)
   , Activity
+  , ActivityMetrics
   , Document
   , Skill
   , AgentInfo
   , SessionSummary
   , ApprovalItem(..)
+  , ActivitiesResponse(..)
   , getActivities
+  , getActivitiesPage
   , getNotes
   , getPreferences
   , getApprovals
@@ -31,7 +35,8 @@ import Wisp.Client
 
 -- | Result of a data load operation
 data DataLoadResult
-  = ActivitiesLoaded [Activity]
+  = ActivitiesLoaded [Activity] (Maybe ActivityMetrics) Bool  -- activities, metrics, hasMore
+  | ActivitiesAppended [Activity] Bool  -- more activities, hasMore
   | KnowledgeLoaded [Document] [Document]  -- notes, prefs
   | SkillsLoaded [Skill]
   | AgentsLoaded [AgentInfo]
@@ -40,13 +45,21 @@ data DataLoadResult
   | LoadError Text
   deriving (Show, Eq)
 
--- | Load activities from server
+-- | Load activities from server (first page)
 loadActivities :: ClientConfig -> IO DataLoadResult
 loadActivities cfg = do
   result <- getActivities cfg
   pure $ case result of
     Left err -> LoadError $ "Failed to load activities: " <> showError err
-    Right acts -> ActivitiesLoaded acts
+    Right resp -> ActivitiesLoaded (arActivities resp) (arMetrics resp) (arHasMore resp)
+
+-- | Load more activities (pagination)
+loadMoreActivities :: ClientConfig -> Int -> IO DataLoadResult
+loadMoreActivities cfg offset = do
+  result <- getActivitiesPage cfg 50 offset
+  pure $ case result of
+    Left err -> LoadError $ "Failed to load more activities: " <> showError err
+    Right resp -> ActivitiesAppended (arActivities resp) (arHasMore resp)
 
 -- | Load knowledge (notes, prefs) from server
 loadKnowledge :: ClientConfig -> IO DataLoadResult

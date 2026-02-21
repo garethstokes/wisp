@@ -2,6 +2,8 @@ module Wisp.Client.Activities
   ( Activity(..)
   , ActivitySource(..)
   , ActivityStatus(..)
+  , ActivityMetrics(..)
+  , SourceCount(..)
   ) where
 
 import Control.Applicative ((<|>))
@@ -13,7 +15,7 @@ import qualified Data.ByteString.Lazy as BL
 import Data.Time (UTCTime)
 import GHC.Generics (Generic)
 
-data ActivitySource = Email | Calendar | Conversation | Note | GitHubEvent
+data ActivitySource = Email | Calendar | Conversation | Note | GitHubEvent | UnknownSource
   deriving (Show, Eq, Generic)
 
 instance FromJSON ActivitySource where
@@ -23,7 +25,7 @@ instance FromJSON ActivitySource where
     "conversation" -> pure Conversation
     "note" -> pure Note
     "github_event" -> pure GitHubEvent
-    other -> fail $ "Unknown source: " <> show other
+    _ -> pure UnknownSource
 
 instance ToJSON ActivitySource where
   toJSON Email = "email"
@@ -31,6 +33,7 @@ instance ToJSON ActivitySource where
   toJSON Conversation = "conversation"
   toJSON Note = "note"
   toJSON GitHubEvent = "github_event"
+  toJSON UnknownSource = "unknown"
 
 data ActivityStatus = Pending | Stored | Surfaced | Quarantined | Archived | NeedsReview | Processed
   deriving (Show, Eq, Generic)
@@ -81,3 +84,29 @@ instance FromJSON Activity where
       rawToText :: Value -> Text
       rawToText val = TE.decodeUtf8 $ BL.toStrict $
         encodePretty' (defConfig { confIndent = Spaces 2 }) val
+
+-- | Per-source activity counts
+data SourceCount = SourceCount
+  { sourceCountSource :: ActivitySource
+  , sourceCountTotal :: Int
+  , sourceCountRecent :: Int  -- Last 24 hours
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON SourceCount where
+  parseJSON = withObject "SourceCount" $ \v -> SourceCount
+    <$> v .: "source"
+    <*> v .: "total"
+    <*> v .: "recent"
+
+-- | Activity metrics summary
+data ActivityMetrics = ActivityMetrics
+  { metricsTotal :: Int
+  , metricsRecent :: Int  -- Last 24 hours
+  , metricsBySource :: [SourceCount]
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON ActivityMetrics where
+  parseJSON = withObject "ActivityMetrics" $ \v -> ActivityMetrics
+    <$> v .: "total"
+    <*> v .: "recent"
+    <*> v .: "by_source"

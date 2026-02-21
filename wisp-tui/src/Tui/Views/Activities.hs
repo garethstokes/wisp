@@ -1,6 +1,8 @@
 module Tui.Views.Activities
   ( activitiesWidget
   , handleActivitiesEvent
+  , ActivitiesAction(..)
+  , handleActivitiesEventWithAction
   ) where
 
 import Brick
@@ -13,7 +15,7 @@ import Data.Time.Clock (nominalDay)
 import Lens.Micro ((^.), (.~), (%~))
 
 import Tui.Types
-import Wisp.Client (Activity(..), ActivitySource(..), ActivityStatus(..))
+import Wisp.Client (Activity(..), ActivitySource(..), ActivityStatus(..), ActivityMetrics(..), SourceCount(..))
 
 -- | Activities view widget
 activitiesWidget :: Maybe UTCTime -> ActivitiesState -> Widget Name
@@ -22,11 +24,38 @@ activitiesWidget mNow as = case as ^. asExpanded of
     -- Show detail view for expanded activity
     detailView (activities !! idx)
   _ -> vBox
-    [ filterBar as
+    [ metricsHeader (as ^. asMetrics)
+    , filterBar as
     , activityList mNow as
     ]
   where
     activities = as ^. asActivities
+
+-- | Display high-level metrics
+metricsHeader :: Maybe ActivityMetrics -> Widget Name
+metricsHeader Nothing = emptyWidget
+metricsHeader (Just m) = vLimit 2 $ vBox
+  [ hBox
+      [ padRight (Pad 2) $ txt $ "Total: " <> T.pack (show (metricsTotal m))
+      , padRight (Pad 2) $ txt $ "24h: " <> T.pack (show (metricsRecent m))
+      , txt " │ "
+      , hBox $ punctuate (txt " ") $ map renderSourceCount (metricsBySource m)
+      ]
+  , txt ""
+  ]
+
+renderSourceCount :: SourceCount -> Widget Name
+renderSourceCount sc = hBox
+  [ txt $ sourceIcon (sourceCountSource sc)
+  , txt $ T.pack (show (sourceCountTotal sc))
+  , txt "/"
+  , txt $ T.pack (show (sourceCountRecent sc))
+  ]
+
+punctuate :: Widget Name -> [Widget Name] -> [Widget Name]
+punctuate _ [] = []
+punctuate _ [x] = [x]
+punctuate sep (x:xs) = x : sep : punctuate sep xs
 
 filterBar :: ActivitiesState -> Widget Name
 filterBar as = vLimit 1 $ hBox
@@ -40,10 +69,17 @@ activityList :: Maybe UTCTime -> ActivitiesState -> Widget Name
 activityList mNow as =
   let activities = as ^. asActivities
       selected = as ^. asSelected
+      hasMore = as ^. asHasMore
+      isLoading = as ^. asLoading
+      loadMoreWidget
+        | isLoading = txt "  Loading..."
+        | hasMore = txt "  [G] Load more activities"
+        | otherwise = emptyWidget
   in if null activities
      then padAll 1 $ txt "No activities. Press 'r' to refresh."
      else viewport ActivityList Vertical $ vBox $
           zipWith (renderActivityRow mNow selected) [0..] activities
+          ++ [loadMoreWidget]
 
 renderActivityRow :: Maybe UTCTime -> Int -> Int -> Activity -> Widget Name
 renderActivityRow mNow selected idx act =
@@ -67,6 +103,7 @@ sourceIcon Calendar = "📅"
 sourceIcon GitHubEvent = "🐙"
 sourceIcon Conversation = "💬"
 sourceIcon Note = "📝"
+sourceIcon UnknownSource = "❓"
 
 statusText :: ActivityStatus -> Text
 statusText Pending = "pending"
@@ -102,6 +139,7 @@ sourceLabel Calendar = "Calendar"
 sourceLabel GitHubEvent = "GitHub"
 sourceLabel Conversation = "Conversation"
 sourceLabel Note = "Note"
+sourceLabel UnknownSource = "Unknown"
 
 -- | Format time as relative (e.g., "5m ago", "2h ago", "1d ago")
 relativeTime :: UTCTime -> UTCTime -> Text
@@ -184,6 +222,26 @@ handleActivitiesEvent (V.EvKey (V.KChar 'u') [V.MCtrl]) = do
 handleActivitiesEvent (V.EvKey (V.KChar 'l') []) = openDetail
 handleActivitiesEvent (V.EvKey V.KEnter []) = openDetail
 handleActivitiesEvent _ = pure ()
+
+-- | Actions that Activities view can request
+data ActivitiesAction = NoAction | LoadMore
+  deriving (Show, Eq)
+
+-- | Handle event and return an action for the main app to handle
+handleActivitiesEventWithAction :: V.Event -> EventM Name AppState ActivitiesAction
+handleActivitiesEventWithAction (V.EvKey (V.KChar 'G') []) = do
+  -- Load more when pressing G (vim-style go to end)
+  s <- get
+  let hasMore = s ^. activitiesState . asHasMore
+      isLoading = s ^. activitiesState . asLoading
+  if hasMore && not isLoading
+    then do
+      modify $ activitiesState . asLoading .~ True
+      pure LoadMore
+    else pure NoAction
+handleActivitiesEventWithAction e = do
+  handleActivitiesEvent e
+  pure NoAction
 
 openDetail :: EventM Name AppState ()
 openDetail = do

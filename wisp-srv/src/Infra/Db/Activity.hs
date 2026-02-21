@@ -11,6 +11,7 @@ module Infra.Db.Activity
   , countActivitiesByStatus
   , getActivitiesForToday
   , getRecentActivities
+  , getActivitiesPaginated
   , getTodaysCalendarEvents
   , getCalendarEventsInRange
   , getUpcomingCalendarEvents
@@ -22,6 +23,7 @@ module Infra.Db.Activity
   , updateActivityTitle
   , searchActivities
   , getActivitySummaryStats
+  , getActivityCountsBySource
   , getActivitiesByTags
   , getAllTags
   , searchTags
@@ -87,7 +89,8 @@ instance FromRow DbActivity where
       parseSource "calendar" = Calendar
       parseSource "conversation" = Conversation
       parseSource "note" = Note
-      parseSource _ = Email  -- default
+      parseSource "github_event" = GitHubEvent
+      parseSource _ = UnknownSource
 
       parseStatus :: Text -> ActivityStatus
       parseStatus "pending" = Pending
@@ -195,6 +198,21 @@ getRecentActivities hours = do
     (Only hours)
   pure $ map unDbActivity results
 
+-- Get all activities with pagination
+getActivitiesPaginated :: Int -> Int -> App [Activity]
+getActivitiesPaginated limit offset = do
+  conn <- getConn
+  results <- liftIO $ query conn
+    "select id, account_id, source, source_id, raw, status, title, summary, \
+    \sender_email, starts_at, ends_at, created_at, \
+    \personas, activity_type, urgency, autonomy_tier, confidence, person_id, \
+    \tags, parent_id \
+    \from activities \
+    \order by created_at desc \
+    \limit ? offset ?"
+    (limit, offset)
+  pure $ map unDbActivity results
+
 -- Get today's calendar events
 getTodaysCalendarEvents :: App [Activity]
 getTodaysCalendarEvents = do
@@ -272,6 +290,19 @@ getActivitySummaryStats = do
     \from activities \
     \group by source, status \
     \order by source, status"
+
+-- Get activity counts by source (total and last 24 hours)
+-- Returns: (source, total_count, recent_count)
+getActivityCountsBySource :: App [(Text, Int, Int)]
+getActivityCountsBySource = do
+  conn <- getConn
+  liftIO $ query_ conn
+    "select source, \
+    \       count(*)::int as total, \
+    \       count(*) filter (where created_at >= now() - interval '24 hours')::int as recent \
+    \from activities \
+    \group by source \
+    \order by total desc"
 
 -- Get pending emails (for chat context)
 getPendingEmails :: Int -> App [Activity]

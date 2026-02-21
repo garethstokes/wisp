@@ -14,13 +14,16 @@ module Http.Handlers.Activities
 import Control.Monad.Reader (ReaderT)
 import Control.Monad.Trans.Class (lift)
 import Data.Aeson (object, (.=), Value)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
+import qualified Data.Text as T
+import qualified Data.Text.Read as TR
 import Network.HTTP.Types.Status (status404)
-import Web.Scotty.Trans (ActionT, json, status, pathParam)
+import Web.Scotty.Trans (ActionT, json, status, pathParam, queryParamMaybe)
 import App.Monad (Env)
 import Domain.Id (EntityId(..))
 import Domain.Activity (Activity(..), ActivityStatus(..))
-import Infra.Db.Activity (getActivitiesByStatus, countActivitiesByStatus, getActivity, getActivitiesForToday, getTodaysCalendarEvents, updateActivityStatus, getRecentActivities)
+import Infra.Db.Activity (getActivitiesByStatus, countActivitiesByStatus, getActivity, getActivitiesForToday, getTodaysCalendarEvents, updateActivityStatus, getActivitiesPaginated, getActivityCountsBySource)
 import Infra.Db.Receipt (getReceiptsForActivity)
 import Services.Scheduler (runPollCycle)
 
@@ -48,15 +51,45 @@ activityToJson a = object
   , "tags" .= activityTags a
   ]
 
--- GET /activities
+-- GET /activities?limit=50&offset=0
 getActivities :: ActionT (ReaderT Env IO) ()
 getActivities = do
-  -- Get recent activities from last 24 hours
-  activities <- lift $ getRecentActivities 24
-  json $ object
+  -- Parse pagination params
+  mLimit <- queryParamMaybe "limit"
+  mOffset <- queryParamMaybe "offset"
+  let limit = fromMaybe 50 (mLimit >>= parseIntParam)
+      offset = fromMaybe 0 (mOffset >>= parseIntParam)
+  -- Get paginated activities
+  activities <- lift $ getActivitiesPaginated limit offset
+  -- Get counts by source (total and last 24 hours) - only on first page
+  sourceCounts <- if offset == 0
+    then lift getActivityCountsBySource
+    else pure []
+  let metrics = if offset == 0
+        then Just $ object
+          [ "by_source" .= [ object
+              [ "source" .= src
+              , "total" .= total
+              , "recent" .= recent
+              ]
+            | (src, total, recent) <- sourceCounts
+            ]
+          , "total" .= sum [total | (_, total, _) <- sourceCounts]
+          , "recent" .= sum [recent | (_, _, recent) <- sourceCounts]
+          ]
+        else Nothing
+  json $ object $
     [ "activities" .= map activityToJson activities
     , "count" .= length activities
-    ]
+    , "offset" .= offset
+    , "has_more" .= (length activities == limit)
+    ] ++ maybe [] (\m -> ["metrics" .= m]) metrics
+
+-- Parse an integer from Text
+parseIntParam :: Text -> Maybe Int
+parseIntParam t = case TR.decimal t of
+  Right (n, rest) | T.null rest -> Just n
+  _ -> Nothing
 
 -- GET /activities/stats - Get counts by status
 getActivityStats :: ActionT (ReaderT Env IO) ()
