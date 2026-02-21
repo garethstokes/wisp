@@ -9,6 +9,7 @@ module Http.Handlers.Activities
   , approveActivity
   , dismissActivity
   , triggerPoll
+  , backfillGitHubDiffs
   ) where
 
 import Control.Monad.Reader (ReaderT)
@@ -202,3 +203,12 @@ triggerPoll :: ActionT (ReaderT Env IO) ()
 triggerPoll = do
   lift runPollCycle
   json $ object ["status" .= ("poll triggered" :: Text)]
+
+-- POST /admin/backfill-github-diffs - Backfill diffs for existing PushEvents
+backfillGitHubDiffs :: ActionT (ReaderT Env IO) ()
+backfillGitHubDiffs = do
+  -- This will call backfillPushEventDiffs from GitHubPoller (implemented in Task 5)
+  json $ object
+    [ "status" .= ("backfill endpoint ready" :: Text)
+    , "message" .= ("Implementation pending in Task 5" :: Text)
+    ]
