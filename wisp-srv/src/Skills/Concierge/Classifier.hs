@@ -28,6 +28,8 @@ classifyActivity activity = do
         Calendar -> "calendar"
         Conversation -> "conversation"
         Note -> "note"
+        GitHubEvent -> "github_event"
+        UnknownSource -> "unknown"
   let prompt = buildClassificationPrompt source (activityTitle activity) (activityRaw activity)
   result <- liftIO $ callClaude apiKey model prompt
   pure $ case result of

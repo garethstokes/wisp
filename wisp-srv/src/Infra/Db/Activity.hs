@@ -57,6 +57,7 @@ sourceToText Calendar = "calendar"
 sourceToText Conversation = "conversation"
 sourceToText Note = "note"
 sourceToText GitHubEvent = "github_event"
+sourceToText UnknownSource = "unknown"
 
 -- Newtype wrapper to define FromRow instance without orphan warning
 newtype DbActivity = DbActivity { unDbActivity :: Activity }
