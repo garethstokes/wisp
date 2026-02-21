@@ -112,3 +112,26 @@ Partial failures don't block the whole event from being stored.
 - Trigger poll, verify PushEvents have `commits_with_diffs` in raw JSON
 - Test backfill on existing events
 - Verify TUI detail view shows diff content
+
+## Implementation Notes
+
+Implementation completed 2025-02-22.
+
+### Key Implementation Details
+
+1. **CommitWithDiff type**: Added to `Infra.GitHub.Commits` with JSON serialization for both encoding and decoding.
+
+2. **Enrichment during polling**: The `enrichPushEventWithDiffs` function in `GitHubPoller.hs` enriches events before they're stored. The `commits_with_diffs` array is injected into the `payload` object of the raw JSON.
+
+3. **Backfill endpoint**: `POST /admin/backfill-github-diffs` processes up to 1000 existing activities, filters for PushEvents without diffs, and enriches them.
+
+4. **Pattern match completeness**: Added `UnknownSource` handling to `sourceToText` in `Infra.Db.Activity` and to the classifier in `Skills.Concierge.Classifier`.
+
+### Commits
+
+- `642a649` feat(github): add fetchCommitDiff for retrieving commit diffs
+- `525cb79` feat(github): add enrichPushEventWithDiffs function
+- `2d26855` feat(github): integrate diff fetching into polling flow
+- `6703441` feat(github): add backfill endpoint structure
+- `76dd277` feat(github): implement backfillPushEventDiffs
+- `22a4c95` fix: add UnknownSource handling to pattern matches
