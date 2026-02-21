@@ -135,19 +135,21 @@ pollGitHubForAccount acc = do
           | eventsNotModified response -> pure $ Right []  -- Nothing new
           | otherwise -> do
               -- Process events
-              newIds <- processEvents (accountId acc) (eventsData response)
+              newIds <- processEvents (accountId acc) token (eventsData response)
               -- Update ETag in poll state
               updatePollStateForAccount (accountId acc) "github" (eventsETag response)
               pure $ Right newIds
 
 -- | Process a list of events, inserting as activities
-processEvents :: EntityId -> [GitHubEvent] -> App [EntityId]
-processEvents accId events = do
+processEvents :: EntityId -> Text -> [GitHubEvent] -> App [EntityId]
+processEvents accId accessToken events = do
   results <- forM events $ \event -> do
     exists <- activityExistsForAccount accId Activity.GitHubEvent (ghEventId event)
     if exists
       then pure Nothing
       else do
-        let activity = buildActivityFromEvent accId event
+        -- Enrich PushEvents with commit diffs
+        enrichedEvent <- liftIO $ enrichPushEventWithDiffs accessToken event
+        let activity = buildActivityFromEvent accId enrichedEvent
         insertActivity activity
   pure [aid | Just aid <- results]
