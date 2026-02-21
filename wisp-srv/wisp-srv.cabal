@@ -89,6 +89,7 @@ executable wisp-srv
         Infra.Db.Document
         Infra.Claude.Client
         Infra.GitHub.Auth
+        Infra.GitHub.Commits
         Infra.GitHub.Events
         Infra.Google.Auth
         Infra.Google.Calendar
@@ -243,6 +244,7 @@ test-suite wisp-srv-test
         Infra.Claude.ClientSpec
         Infra.GitHub.Auth
         Infra.GitHub.AuthSpec
+        Infra.GitHub.Commits
         Infra.GitHub.Events
         Infra.GitHub.EventsSpec
         Infra.Google.Auth
