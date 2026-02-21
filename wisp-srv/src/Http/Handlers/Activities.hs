@@ -27,6 +27,7 @@ import Domain.Activity (Activity(..), ActivityStatus(..))
 import Infra.Db.Activity (getActivitiesByStatus, countActivitiesByStatus, getActivity, getActivitiesForToday, getTodaysCalendarEvents, updateActivityStatus, getActivitiesPaginated, getActivityCountsBySource)
 import Infra.Db.Receipt (getReceiptsForActivity)
 import Services.Scheduler (runPollCycle)
+import Services.GitHubPoller (backfillPushEventDiffs)
 
 -- Convert Activity to JSON (full details including classification)
 activityToJson :: Activity -> Value
@@ -207,8 +208,8 @@ triggerPoll = do
 -- POST /admin/backfill-github-diffs - Backfill diffs for existing PushEvents
 backfillGitHubDiffs :: ActionT (ReaderT Env IO) ()
 backfillGitHubDiffs = do
-  -- This will call backfillPushEventDiffs from GitHubPoller (implemented in Task 5)
+  result <- lift backfillPushEventDiffs
   json $ object
-    [ "status" .= ("backfill endpoint ready" :: Text)
-    , "message" .= ("Implementation pending in Task 5" :: Text)
+    [ "status" .= ("complete" :: Text)
+    , "result" .= result
     ]

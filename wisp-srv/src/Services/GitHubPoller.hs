@@ -2,6 +2,7 @@ module Services.GitHubPoller
   ( pollGitHubForAccount
   , pollAllGitHub
   , buildActivityFromEvent
+  , backfillPushEventDiffs
   ) where
 
 import Control.Monad (forM)
@@ -19,7 +20,7 @@ import Domain.Account (Account(..), AccountProvider(..), accountIdentifier)
 import Domain.Activity (NewActivity(..))
 import qualified Domain.Activity as Activity
 import Infra.Db.Account (getAccountsByProvider)
-import Infra.Db.Activity (insertActivity, activityExistsForAccount)
+import Infra.Db.Activity (insertActivity, activityExistsForAccount, getActivitiesPaginated, updateActivityRaw)
 import Infra.Db.PollState (getPollStateForAccount, updatePollStateForAccount, ensurePollStateExists, PollState(..))
 import Infra.GitHub.Events (GitHubEvent(..), EventsResponse(..), listEvents, extractEventTitle)
 import Infra.GitHub.Commits (fetchCommitDiff, CommitWithDiff(..))
@@ -153,3 +154,68 @@ processEvents accId accessToken events = do
         let activity = buildActivityFromEvent accId enrichedEvent
         insertActivity activity
   pure [aid | Just aid <- results]
+
+-- | Backfill diffs for existing PushEvent activities
+backfillPushEventDiffs :: App Text
+backfillPushEventDiffs = do
+  -- Get GitHub accounts
+  accounts <- getAccountsByProvider GitHub
+
+  totalUpdated <- fmap sum $ forM accounts $ \acc -> do
+    case (accountIdentifier acc, getAccessToken acc) of
+      (Just _username, Just token) -> do
+        -- Get all activities (up to 1000)
+        activities <- getActivitiesPaginated 1000 0
+        let pushEvents = filter needsBackfill activities
+
+        -- Enrich each one
+        updated <- forM pushEvents $ \activity -> do
+          enriched <- liftIO $ enrichActivityRaw token activity
+          case enriched of
+            Just newRaw -> do
+              updateActivityRaw (Activity.activityId activity) newRaw
+              pure (1 :: Int)
+            Nothing -> pure 0
+        pure $ sum updated
+      _ -> pure 0
+
+  pure $ "Updated " <> T.pack (show totalUpdated) <> " activities"
+
+-- | Check if activity needs backfill
+needsBackfill :: Activity.Activity -> Bool
+needsBackfill a =
+  Activity.activitySource a == Activity.GitHubEvent
+  && maybe False (T.isPrefixOf "PushEvent") (Activity.activityTitle a)
+  && not (hasCommitsWithDiffs (Activity.activityRaw a))
+  where
+    hasCommitsWithDiffs (Object obj) = case KM.lookup "payload" obj of
+      Just (Object p) -> KM.member "commits_with_diffs" p
+      _ -> False
+    hasCommitsWithDiffs _ = False
+
+-- | Enrich an activity's raw JSON with diffs
+enrichActivityRaw :: Text -> Activity.Activity -> IO (Maybe Value)
+enrichActivityRaw token activity = do
+  case Activity.activityRaw activity of
+    Object obj -> do
+      let repoName = case KM.lookup "repo" obj of
+            Just (Object r) -> case KM.lookup "name" r of
+              Just (String n) -> n
+              _ -> ""
+            _ -> ""
+          (owner, repo) = splitRepoName repoName
+          commits = case KM.lookup "payload" obj of
+            Just (Object p) -> case KM.lookup "commits" p of
+              Just (Array arr) -> V.toList arr
+              _ -> []
+            _ -> []
+
+      if null commits || T.null owner
+        then pure Nothing
+        else do
+          commitsWithDiffs <- mapM (fetchDiffForCommit owner repo token) commits
+          let newPayload = case KM.lookup "payload" obj of
+                Just (Object p) -> Object $ KM.insert "commits_with_diffs" (toJSON commitsWithDiffs) p
+                _ -> Object KM.empty
+          pure $ Just $ Object $ KM.insert "payload" newPayload obj
+    _ -> pure Nothing
