@@ -23,12 +23,13 @@ data KnowledgeContext = KnowledgeContext
   { kcProjects :: [Document]
   , kcRelevantNotes :: [Document]
   , kcPreferences :: [Document]
+  , kcSessionSummaries :: [Document]  -- ^ Recent session summaries for this agent
   } deriving (Show)
 
 -- | Get knowledge context for an agent conversation
--- Takes optional tags to filter relevant notes
-getKnowledgeContext :: TenantId -> [Text] -> App KnowledgeContext
-getKnowledgeContext _tenantId mentionedTags = do
+-- Takes agent name and optional tags to filter relevant notes
+getKnowledgeContext :: TenantId -> Text -> [Text] -> App KnowledgeContext
+getKnowledgeContext _tenantId agentId mentionedTags = do
   -- Get all active projects
   projects <- getDocumentsByType ProjectDoc True 20
 
@@ -40,10 +41,15 @@ getKnowledgeContext _tenantId mentionedTags = do
     then getDocumentsByType NoteDoc True 10  -- Recent notes if no tags
     else getDocumentsByTags mentionedTags True 20
 
+  -- Get recent session summaries for this agent
+  let summaryTags = ["session-summary", "agent:" <> agentId]
+  summaries <- getDocumentsByTags summaryTags True 5
+
   pure KnowledgeContext
     { kcProjects = projects
     , kcRelevantNotes = relevantNotes
     , kcPreferences = preferences
+    , kcSessionSummaries = summaries
     }
 
 -- | Format knowledge context as text for system prompt
@@ -65,6 +71,11 @@ formatKnowledgeContext kc = T.unlines
   , if null (kcRelevantNotes kc)
       then "(no relevant notes)"
       else T.unlines $ map formatNote (kcRelevantNotes kc)
+  , ""
+  , "### Recent Conversations"
+  , if null (kcSessionSummaries kc)
+      then "(no recent conversation history)"
+      else T.unlines $ map formatSummary (kcSessionSummaries kc)
   ]
   where
     formatProject doc = case fromJSON (documentData doc) of
@@ -78,6 +89,10 @@ formatKnowledgeContext kc = T.unlines
     formatNote doc = case fromJSON (documentData doc) of
       Success (nd :: NoteData) -> "- " <> noteTitle nd <> " [" <> T.intercalate ", " (documentTags doc) <> "]"
       Error _ -> "- (unknown note)"
+
+    formatSummary doc = case fromJSON (documentData doc) of
+      Success (nd :: NoteData) -> "- " <> maybe "(no summary)" id (noteContent nd)
+      Error _ -> "- (unknown summary)"
 
 -- | Check if a message is a note command
 -- Recognizes "Note: ..." and "Remember: ..." prefixes

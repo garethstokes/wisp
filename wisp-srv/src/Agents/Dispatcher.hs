@@ -83,8 +83,8 @@ dispatchChatNormal tenantId accountId agentName msgs mTimezone mSessionId emit =
   case mAgent of
     Nothing -> pure $ Left $ "Unknown agent: " <> agentName
     Just agent -> withRunLogging agentName mSessionId msgs $ \ctx messages -> do
-      -- Fetch knowledge context
-      knowledgeCtx <- getKnowledgeContext tenantId []  -- TODO: extract tags from messages
+      -- Fetch knowledge context (including session summaries for this agent)
+      knowledgeCtx <- getKnowledgeContext tenantId agentName []  -- TODO: extract tags from messages
 
       -- Load skill prompt if skill is active
       mSkillPrompt <- case agentSkill agent of
