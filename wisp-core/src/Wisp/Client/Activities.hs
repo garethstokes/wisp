@@ -67,6 +67,8 @@ data Activity = Activity
   , activityTags :: [Text]
   , activityCreatedAt :: UTCTime
   , activityConfidence :: Maybe Double
+  , activityUrgency :: Maybe Text
+  , activityAutonomyTier :: Maybe Int
   } deriving (Show, Eq, Generic)
 
 instance FromJSON Activity where
@@ -79,6 +81,8 @@ instance FromJSON Activity where
     <*> (v .: "tags" <|> pure [])  -- Default to empty if missing
     <*> v .: "created_at"
     <*> v .:? "confidence"
+    <*> v .:? "urgency"
+    <*> v .:? "autonomy_tier"
     where
       -- Pretty-print JSON with 2-space indentation
       rawToText :: Value -> Text

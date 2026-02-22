@@ -86,16 +86,31 @@ renderActivityRow mNow selected idx act =
   let isSelected = idx == selected
       marker = if isSelected then "> " else "  "
       icon = sourceIcon (activitySource act)
-      title = maybe (T.take 80 $ activityRaw act) id (activityTitle act)
+      title = maybe (T.take 60 $ activityRaw act) id (activityTitle act)
       timeAgo = maybe "" (relativeTime (activityCreatedAt act)) mNow
-      -- Use padRight Max instead of fill to avoid infinite width
+      -- Classification info
+      conf = maybe "" (\c -> T.pack (show (round (c * 100) :: Int)) <> "%") (activityConfidence act)
+      urgency = maybe "" urgencyIcon (activityUrgency act)
+      tier = maybe "" (\t -> "T" <> T.pack (show t)) (activityAutonomyTier act)
+      tags = if null (activityTags act) then "" else T.intercalate "," (take 2 $ activityTags act)
+      -- Build metadata string
+      meta = T.intercalate " " $ filter (not . T.null) [urgency, tier, conf, tags]
   in hBox
         [ txt marker
         , txt icon
         , txt " "
-        , padRight Max $ txt title  -- No truncation, let it use available space
-        , txt $ " " <> timeAgo <> " "
+        , hLimit 65 $ txt title
+        , txt " "
+        , hLimit 20 $ txt meta
+        , padLeft Max $ txt $ timeAgo <> " "
         ]
+
+-- | Icon for urgency level
+urgencyIcon :: Text -> Text
+urgencyIcon "high" = "🔴"
+urgencyIcon "normal" = "🟡"
+urgencyIcon "low" = "🟢"
+urgencyIcon _ = ""
 
 sourceIcon :: ActivitySource -> Text
 sourceIcon Email = "📧"

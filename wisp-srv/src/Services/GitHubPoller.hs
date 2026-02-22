@@ -12,7 +12,6 @@ import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KM
 import Data.Text (Text)
 import qualified Data.Text as T
-import qualified Data.Vector as V
 
 import App.Monad (App)
 import Domain.Id (EntityId)
@@ -23,7 +22,7 @@ import Infra.Db.Account (getAccountsByProvider)
 import Infra.Db.Activity (insertActivity, activityExistsForAccount, getActivitiesPaginated, updateActivityRaw)
 import Infra.Db.PollState (getPollStateForAccount, updatePollStateForAccount, ensurePollStateExists, PollState(..))
 import Infra.GitHub.Events (GitHubEvent(..), EventsResponse(..), listEvents, extractEventTitle)
-import Infra.GitHub.Commits (fetchCommitDiff, CommitWithDiff(..))
+import Infra.GitHub.Commits (fetchCompareDiff, PushDiff(..))
 
 -- | Build a NewActivity from a GitHubEvent
 buildActivityFromEvent :: EntityId -> GitHubEvent -> NewActivity
@@ -38,8 +37,8 @@ buildActivityFromEvent accId event = NewActivity
   , newActivityEndsAt = Nothing
   }
 
--- | Enrich a PushEvent with commit diffs
--- Returns the modified event with commits_with_diffs added to payload
+-- | Enrich a PushEvent with the diff between before and head commits
+-- Uses GitHub's compare API to get the full diff
 enrichPushEventWithDiffs :: Text -> GitHubEvent -> IO GitHubEvent
 enrichPushEventWithDiffs accessToken event
   | ghEventType event /= "PushEvent" = pure event
@@ -48,19 +47,21 @@ enrichPushEventWithDiffs accessToken event
           repoName = ghEventRepo event  -- format: "owner/repo"
           (owner, repo) = splitRepoName repoName
 
-      -- Extract commits from payload
-      commits <- case payload of
-        Object obj -> case KM.lookup "commits" obj of
-          Just (Array arr) -> pure $ V.toList arr
-          _ -> pure []
-        _ -> pure []
+      -- Extract before and head SHAs from payload
+      let (baseSha, headSha) = extractPushShas payload
 
-      -- Fetch diff for each commit
-      commitsWithDiffs <- mapM (fetchDiffForCommit owner repo accessToken) commits
+      -- Fetch the compare diff
+      pushDiff <- if T.null baseSha || T.null headSha
+        then pure $ PushDiff baseSha headSha Nothing (Just "Missing before/head SHA") 0
+        else do
+          result <- fetchCompareDiff owner repo baseSha headSha accessToken
+          pure $ case result of
+            Right diff -> PushDiff baseSha headSha (Just diff) Nothing 1
+            Left err -> PushDiff baseSha headSha Nothing (Just err) 0
 
-      -- Add commits_with_diffs to the payload
+      -- Add push_diff to the payload
       let enrichedPayload = case payload of
-            Object obj -> Object $ KM.insert "commits_with_diffs" (toJSON commitsWithDiffs) obj
+            Object obj -> Object $ KM.insert "push_diff" (toJSON pushDiff) obj
             other -> other
 
       pure $ event { ghEventPayload = enrichedPayload }
@@ -71,33 +72,17 @@ splitRepoName name = case T.splitOn "/" name of
   [owner, repo] -> (owner, repo)
   _ -> (name, name)  -- fallback
 
--- | Fetch diff for a single commit value
-fetchDiffForCommit :: Text -> Text -> Text -> Value -> IO CommitWithDiff
-fetchDiffForCommit owner repo token commitVal = do
-  let (sha, message, author) = extractCommitInfo commitVal
-      url = "https://github.com/" <> owner <> "/" <> repo <> "/commit/" <> sha
-
-  result <- fetchCommitDiff owner repo sha token
-  pure $ case result of
-    Right diff -> CommitWithDiff sha message author url (Just diff) Nothing
-    Left err -> CommitWithDiff sha message author url Nothing (Just err)
-
--- | Extract commit info from a commit JSON value
-extractCommitInfo :: Value -> (Text, Text, Text)
-extractCommitInfo (Object obj) =
-  let sha = case KM.lookup "sha" obj of
+-- | Extract before and head SHAs from PushEvent payload
+extractPushShas :: Value -> (Text, Text)
+extractPushShas (Object obj) =
+  let baseSha = case KM.lookup "before" obj of
         Just (String s) -> s
         _ -> ""
-      message = case KM.lookup "message" obj of
+      headSha = case KM.lookup "head" obj of
         Just (String s) -> s
         _ -> ""
-      author = case KM.lookup "author" obj of
-        Just (Object a) -> case KM.lookup "name" a of
-          Just (String n) -> n
-          _ -> ""
-        _ -> ""
-  in (sha, message, author)
-extractCommitInfo _ = ("", "", "")
+  in (baseSha, headSha)
+extractPushShas _ = ("", "")
 
 -- | Get access token from account details
 getAccessToken :: Account -> Maybe Text
@@ -182,40 +167,43 @@ backfillPushEventDiffs = do
   pure $ "Updated " <> T.pack (show totalUpdated) <> " activities"
 
 -- | Check if activity needs backfill
+-- Note: Raw JSON uses ghEventPayload (from GitHubEvent ToJSON instance)
 needsBackfill :: Activity.Activity -> Bool
 needsBackfill a =
   Activity.activitySource a == Activity.GitHubEvent
   && maybe False (T.isPrefixOf "PushEvent") (Activity.activityTitle a)
-  && not (hasCommitsWithDiffs (Activity.activityRaw a))
+  && not (hasPushDiff (Activity.activityRaw a))
   where
-    hasCommitsWithDiffs (Object obj) = case KM.lookup "payload" obj of
-      Just (Object p) -> KM.member "commits_with_diffs" p
+    hasPushDiff (Object obj) = case KM.lookup "ghEventPayload" obj of
+      Just (Object p) -> KM.member "push_diff" p
       _ -> False
-    hasCommitsWithDiffs _ = False
+    hasPushDiff _ = False
 
 -- | Enrich an activity's raw JSON with diffs
+-- Note: Raw JSON uses ghEventRepo/ghEventPayload (from GitHubEvent ToJSON instance)
 enrichActivityRaw :: Text -> Activity.Activity -> IO (Maybe Value)
 enrichActivityRaw token activity = do
   case Activity.activityRaw activity of
     Object obj -> do
-      let repoName = case KM.lookup "repo" obj of
-            Just (Object r) -> case KM.lookup "name" r of
-              Just (String n) -> n
-              _ -> ""
+      -- ghEventRepo is a Text like "owner/repo", not an object
+      let repoName = case KM.lookup "ghEventRepo" obj of
+            Just (String n) -> n
             _ -> ""
           (owner, repo) = splitRepoName repoName
-          commits = case KM.lookup "payload" obj of
-            Just (Object p) -> case KM.lookup "commits" p of
-              Just (Array arr) -> V.toList arr
-              _ -> []
-            _ -> []
+          -- Extract before/head SHAs from payload
+          (baseSha, headSha) = case KM.lookup "ghEventPayload" obj of
+            Just payload -> extractPushShas payload
+            _ -> ("", "")
 
-      if null commits || T.null owner
+      if T.null owner || T.null baseSha || T.null headSha
         then pure Nothing
         else do
-          commitsWithDiffs <- mapM (fetchDiffForCommit owner repo token) commits
-          let newPayload = case KM.lookup "payload" obj of
-                Just (Object p) -> Object $ KM.insert "commits_with_diffs" (toJSON commitsWithDiffs) p
+          result <- fetchCompareDiff owner repo baseSha headSha token
+          let pushDiff = case result of
+                Right diff -> PushDiff baseSha headSha (Just diff) Nothing 1
+                Left err -> PushDiff baseSha headSha Nothing (Just err) 0
+          let newPayload = case KM.lookup "ghEventPayload" obj of
+                Just (Object p) -> Object $ KM.insert "push_diff" (toJSON pushDiff) p
                 _ -> Object KM.empty
-          pure $ Just $ Object $ KM.insert "payload" newPayload obj
+          pure $ Just $ Object $ KM.insert "ghEventPayload" newPayload obj
     _ -> pure Nothing

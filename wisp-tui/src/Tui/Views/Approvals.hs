@@ -64,6 +64,7 @@ sourceIcon Calendar = "📅"
 sourceIcon GitHubEvent = "🐙"
 sourceIcon Conversation = "💬"
 sourceIcon Note = "📝"
+sourceIcon UnknownSource = "❓"
 
 -- | Full detail view for an approval item
 approvalDetailView :: Activity -> Text -> Text -> Widget Name
@@ -91,6 +92,7 @@ sourceLabel Calendar = "Calendar"
 sourceLabel GitHubEvent = "GitHub"
 sourceLabel Conversation = "Conversation"
 sourceLabel Note = "Note"
+sourceLabel UnknownSource = "Unknown"
 
 statusText :: ActivityStatus -> Text
 statusText Pending = "pending"
