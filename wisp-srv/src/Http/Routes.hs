@@ -4,7 +4,7 @@ module Http.Routes
 
 import Control.Monad.Reader (ReaderT)
 import Web.Scotty.Trans (ScottyT, get, post, put)
-import Http.Handlers.Agents (getAgentsList, getAgentByName, getAgentSessions, postAgentActivateSkill, postAgentDeactivate)
+import Http.Handlers.Agents (getAgentsList, getAgentByName, getAgentSessions, getAgentActiveSession, postAgentActivateSkill, postAgentDeactivate)
 import Http.Handlers.Auth (getGoogleAuth, getGoogleCallback, getGitHubAuth, getGitHubCallback, getAuthStatus)
 import Http.Handlers.Health (getHealth)
 import Http.Handlers.Activities (getActivities, getActivityStats, getActivityById, getActivityLogs, getInbox, getReview, approveActivity, dismissActivity, triggerPoll, backfillGitHubDiffs, summarizeSessions)
@@ -27,6 +27,7 @@ routes = do
   get "/api/agents" getAgentsList
   get "/api/agents/:name" getAgentByName
   get "/api/agents/:name/sessions" getAgentSessions
+  get "/api/agents/:name/active-session" getAgentActiveSession
   post "/api/agents/:name/activate/:skill" postAgentActivateSkill
   post "/api/agents/:name/deactivate" postAgentDeactivate
 

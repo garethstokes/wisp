@@ -2,6 +2,7 @@ module Http.Handlers.Agents
   ( getAgentsList
   , getAgentByName
   , getAgentSessions
+  , getAgentActiveSession
   , postAgentActivateSkill
   , postAgentDeactivate
   ) where
@@ -10,6 +11,8 @@ import Control.Monad.Reader (ReaderT)
 import Control.Monad.Trans.Class (lift)
 import Data.Aeson (FromJSON(..), ToJSON(..), Value, object, withObject, (.:), (.=))
 import Data.Text (Text)
+import Data.Time (getCurrentTime)
+import Control.Monad.IO.Class (liftIO)
 import GHC.Generics (Generic)
 import Network.HTTP.Types.Status (status400, status404, status500)
 import Web.Scotty.Trans (ActionT, json, status, jsonData, captureParam)
@@ -22,7 +25,8 @@ import Domain.Agent (AgentConfig(..))
 import Domain.Soul (Soul(..))
 import Domain.Tenant (TenantId, Tenant(..))
 import Infra.Db.Tenant (getAllTenants)
-import Infra.Db.Session (getRecentSessions)
+import Infra.Db.Session (getRecentSessions, getActiveSessionWithinThreshold)
+import Domain.Session (Session(..), SessionId(..))
 
 --------------------------------------------------------------------------------
 -- Tenant resolution (TODO: get from auth token)
@@ -108,6 +112,24 @@ getAgentSessions = withTenant $ \_ -> do
     [ "sessions" .= sessions
     , "count" .= length sessions
     ]
+
+-- | GET /api/agents/:name/active-session - get active session for TUI resume
+-- Returns the active session if last message was within 15 minutes, or null
+getAgentActiveSession :: ActionT (ReaderT Env IO) ()
+getAgentActiveSession = withTenant $ \_ -> do
+  name <- captureParam "name"
+  now <- liftIO getCurrentTime
+  let threshold = 15 * 60  -- 15 minutes
+  mSession <- lift $ getActiveSessionWithinThreshold name threshold now
+  case mSession of
+    Nothing -> json (Nothing :: Maybe Value)
+    Just session -> json $ object
+      [ "id" .= unSessionId (sessionId session)
+      , "agent_id" .= sessionAgentId session
+      , "messages" .= sessionMessages session
+      , "created_at" .= sessionCreatedAt session
+      , "last_message_at" .= sessionLastMessageAt session
+      ]
 
 -- | POST /api/agents/:name/activate/:skill - activate a skill
 postAgentActivateSkill :: ActionT (ReaderT Env IO) ()
