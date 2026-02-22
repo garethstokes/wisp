@@ -5,6 +5,7 @@ module Tui.DataLoader
   , loadSkills
   , loadAgents
   , loadAgentSessions
+  , loadChatSession
   , loadApprovals
   , DataLoadResult(..)
   ) where
@@ -20,6 +21,8 @@ import Wisp.Client
   , Skill
   , AgentInfo
   , SessionSummary
+  , ActiveSession(..)
+  , ChatMessage(..)
   , ApprovalItem(..)
   , ActivitiesResponse(..)
   , getActivities
@@ -31,6 +34,7 @@ import Wisp.Client
   , getAgents
   , getAgent
   , getAgentSessions
+  , getActiveSession
   )
 
 -- | Result of a data load operation
@@ -41,6 +45,7 @@ data DataLoadResult
   | SkillsLoaded [Skill]
   | AgentsLoaded [AgentInfo]
   | AgentSessionsLoaded Text [SessionSummary]
+  | ChatSessionLoaded (Maybe (Text, [ChatMessage]))  -- sessionId, messages
   | ApprovalsLoaded [(Activity, Text, Text)]
   | LoadError Text
   deriving (Show, Eq)
@@ -98,6 +103,15 @@ loadAgentSessions cfg agentName = do
   pure $ case result of
     Left err -> LoadError $ "Failed to load sessions: " <> showError err
     Right sessions -> AgentSessionsLoaded agentName sessions
+
+-- | Load active chat session for an agent (for TUI resume)
+loadChatSession :: ClientConfig -> Text -> IO DataLoadResult
+loadChatSession cfg agentName = do
+  result <- getActiveSession cfg agentName
+  pure $ case result of
+    Left err -> LoadError $ "Failed to load session: " <> showError err
+    Right Nothing -> ChatSessionLoaded Nothing
+    Right (Just session) -> ChatSessionLoaded $ Just (asId session, asMessages session)
 
 -- | Load approvals from server
 loadApprovals :: ClientConfig -> IO DataLoadResult
