@@ -1,102 +1,203 @@
-# Agents
+# Agents and Skills
 
 ## Overview
 
-Agents are autonomous components that handle specific domains. Each agent:
-- Lives in its own module under `Agents/`
-- Exports `agentInfo :: AgentInfo` describing its capabilities
-- Can have deterministic flows (Haskell orchestrates, LLM returns structured data)
-- Can have decision flows (LLM outputs tool calls to express intent)
+Wisp uses a **knowledge-based agent architecture** where agents are personas defined by notes in the knowledge system, not hardcoded modules. Each agent:
 
-## Agent Registry
+- Is defined by a note tagged with `agent:NAME` containing its personality configuration
+- Has a **soul** that evolves over time (stored in the database)
+- Can **activate skills** to gain specialized tools
+- Always has access to **base tools** for knowledge management
 
-Use `wisp agents` to list all agents with their tools and implementation status.
+### Key Concepts
 
-Use `GET /agents` endpoint to retrieve agent metadata programmatically.
+| Concept | Description |
+|---------|-------------|
+| **Agent** | A named persona (e.g., `wisp/concierge`) loaded from knowledge |
+| **Soul** | Persistent personality insights that evolve through interactions |
+| **Skill** | A set of specialized tools an agent can activate |
+| **Base Tools** | Tools available to all agents (knowledge, notes, skill activation) |
 
-## Agent Definitions
+## Architecture
 
-### wisp/concierge [IMPLEMENTED]
+```
+┌─────────────────────────────────────────────────────────────┐
+│                         Agent                               │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
+│  │ Personality │  │    Soul     │  │   Active Skill      │ │
+│  │  (from note)│  │ (evolving)  │  │ (optional, dynamic) │ │
+│  └─────────────┘  └─────────────┘  └─────────────────────┘ │
+│                                                             │
+│  ┌─────────────────────────────────────────────────────┐   │
+│  │                    Base Tools                        │   │
+│  │  search_knowledge | read_note | add_note | activate  │   │
+│  └─────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+```
 
-Intake, classification, routing, quarantine.
+## Base Tools
 
-**Deterministic flows:**
-- `classify-pending` - Classify incoming activities
-- `route-activity` - Route based on classification
+All agents have access to these tools without needing a skill:
 
-**Decision flows:**
-- `quarantine-interview` - Interactive chat for quarantined items
+| Tool | Description |
+|------|-------------|
+| `search_knowledge` | Search notes and documents by tags |
+| `read_note` | Read full content of a specific note |
+| `add_note` | Create a new note with optional tags |
+| `activate_skill` | Activate a skill to gain its tools |
+| `deactivate_skill` | Deactivate the current skill (when one is active) |
+
+## Skills
+
+Skills provide specialized tools. An agent can have **one active skill at a time**.
+
+### concierge
+
+Intake, classification, routing, and quarantine management.
 
 **Tools:**
-- `update_activities` (decision) - Update activity status/classification
-- `query_activities` (decision) - Fetch activities by filter
-- `query_people` (decision) - Look up contacts
+| Tool | Description |
+|------|-------------|
+| `update_activities` | Update activity status or classification |
+| `query_activities` | Fetch activities by status, limit, etc. |
+| `query_people` | Look up contacts by name or email |
 
----
+**Example:**
+```json
+{"tool": "query_activities", "status": "pending", "limit": 10}
+{"tool": "update_activities", "activity_ids": ["id1"], "status": "processed"}
+{"tool": "query_people", "search": "alice", "limit": 5}
+```
 
-### wisp/scheduler [IMPLEMENTED]
+### scheduler
 
 Calendar reasoning, schedule queries, finding free time.
 
-**Deterministic flows:** (none)
-
-**Decision flows:**
-- `schedule-query` - Query calendar events
-- `find-time` - Find available time slots
-
 **Tools:**
-- `query_calendar` (decision) - Get calendar events for date range
-- `find_free_slots` (decision) - Find available time slots
+| Tool | Description |
+|------|-------------|
+| `query_calendar` | Get calendar events for a date range |
+| `find_free_slots` | Find available time slots |
+| `list_connected_accounts` | List connected calendar accounts |
 
----
+**Example:**
+```json
+{"tool": "query_calendar", "days": 7}
+{"tool": "find_free_slots", "days": 7, "duration_minutes": 60, "start_hour": 9, "end_hour": 17}
+{"tool": "list_connected_accounts"}
+```
 
-### wisp/housekeeper [NOT IMPLEMENTED]
-
-Admin hygiene, receipts, anomaly detection.
-
-**Deterministic flows:**
-- `create-receipt` - Create audit receipt
-- `cleanup-archived` - Clean up old archived items
-
-**Decision flows:**
-- `anomaly-triage` - Investigate anomalies
-
----
-
-### wisp/insights [IMPLEMENTED]
+### insights
 
 Activity search, pattern analysis, and people frequency insights.
 
-**Deterministic flows:** (none)
-
-**Decision flows:**
-- `search` - Search activities and analyze patterns
-
 **Tools:**
-- `search_activities` (decision) - Full-text search across activities with optional date range and status filters
-- `get_summary` (decision) - Statistical overview of recent activities by status and type
-- `get_people_insights` (decision) - Analyze frequent contacts and interaction patterns
+| Tool | Description |
+|------|-------------|
+| `search_activities` | Full-text search across activities |
+| `get_summary` | Statistical overview of recent activities |
+| `get_people_insights` | Analyze frequent contacts and interaction patterns |
 
-## Adding a New Agent
+**Example:**
+```json
+{"tool": "search_activities", "query": "project update", "limit": 20}
+{"tool": "get_summary", "hours": 24}
+{"tool": "get_people_insights", "search": "bob", "important_only": true}
+```
 
-1. Create `Agents/NewAgent.hs` with `agentInfo :: AgentInfo`
-2. Add module to `wisp-srv.cabal`
-3. Register in `Agents.Dispatcher`:
-   - Add to `allAgents` list
-   - Add dispatch case for `"wisp/newagent"`
-4. Implement `handleChat` if the agent supports chat
+## Default Agents
 
-```haskell
-module Agents.NewAgent (agentInfo) where
+These agents are pre-configured in the seed data:
 
-import Domain.Agent (AgentInfo(..), ToolInfo(..), ToolType(..))
+### wisp/concierge
 
-agentInfo :: AgentInfo
-agentInfo = AgentInfo
-  { agentId = "wisp/newagent"
-  , agentDescription = "Description of what this agent does"
-  , agentTools = []
-  , agentWorkflows = []
-  , agentImplemented = False
+The default chat agent. Handles inbox triage, activity classification, and general assistance.
+
+- **Personality:** Helpful, concise, focused on communication management
+- **Default Skill:** concierge (can switch to others as needed)
+
+### wisp/scheduler
+
+Specialized for calendar and scheduling tasks.
+
+- **Personality:** Time-aware, efficient, scheduling-focused
+- **Default Skill:** scheduler
+
+### wisp/insights
+
+Specialized for analysis and pattern detection.
+
+- **Personality:** Analytical, thorough, pattern-oriented
+- **Default Skill:** insights
+
+## Creating a New Agent
+
+Agents are created by adding a note with the `agent:NAME` tag:
+
+```bash
+# Via CLI
+wisp notes add "My custom agent personality and instructions" \
+  --tags "agent:wisp/custom"
+
+# Via API
+POST /api/notes
+{
+  "content": "You are a specialized agent for...",
+  "tags": ["agent:wisp/custom"],
+  "raw": {
+    "personality_seed": "Be formal and precise.",
+    "active_skill": "scheduler"
   }
+}
+```
+
+### Agent Configuration (raw field)
+
+```json
+{
+  "personality_seed": "Your personality description",
+  "active_skill": "concierge"  // optional, null for no skill
+}
+```
+
+## Implementation Details
+
+### Source Files
+
+| File | Purpose |
+|------|---------|
+| `Agents/Core.hs` | Agent loading, system prompt building |
+| `Agents/Dispatcher.hs` | Routes chat to agents, handles tool loops |
+| `Skills/Registry.hs` | Skill definitions and tool routing |
+| `Skills/Base.hs` | Base tools (knowledge, notes, skill activation) |
+| `Skills/Concierge.hs` | Concierge skill implementation |
+| `Skills/Scheduler.hs` | Scheduler skill implementation |
+| `Skills/Insights.hs` | Insights skill implementation |
+
+### API Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/agents` | List all agent names |
+| `GET /api/agents/:name` | Get agent info (personality, active skill, soul) |
+| `POST /api/agents/:name/activate/:skill` | Activate a skill |
+| `POST /api/agents/:name/deactivate` | Deactivate current skill |
+| `GET /api/agents/:name/sessions` | List chat sessions |
+| `GET /api/agents/:name/active-session` | Get active session (for TUI resume) |
+| `GET /api/skills` | List all available skills |
+
+### CLI Commands
+
+```bash
+# List agents
+wisp agents
+
+# Chat with an agent
+wisp chat -a wisp/concierge -m "What's in my inbox?"
+
+# Activate a skill
+wisp agents activate wisp/concierge scheduler
+
+# Deactivate skill
+wisp agents deactivate wisp/concierge
 ```
