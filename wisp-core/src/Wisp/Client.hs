@@ -34,9 +34,11 @@ import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KM
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.Text.Encoding as TE
 import qualified Data.ByteString.Lazy as BL
 import Network.HTTP.Client
 import Network.HTTP.Types.Status (statusCode)
+import Network.HTTP.Types.URI (urlEncode)
 
 import Wisp.Client.Types
 import Wisp.Client.Activities
@@ -285,11 +287,11 @@ getAgents cfg = do
       _ -> Left $ ParseError "Expected object"
 
 getAgent :: ClientConfig -> Text -> IO (Either ClientError AgentInfo)
-getAgent cfg name = httpGet cfg $ "/api/agents/" <> T.unpack name
+getAgent cfg name = httpGet cfg $ "/api/agents/" <> encodePathSegment name
 
 getAgentSessions :: ClientConfig -> Text -> IO (Either ClientError [SessionSummary])
 getAgentSessions cfg name = do
-  result <- httpGet cfg $ "/api/agents/" <> T.unpack name <> "/sessions"
+  result <- httpGet cfg $ "/api/agents/" <> encodePathSegment name <> "/sessions"
   pure $ case result of
     Left e -> Left e
     Right val -> case val of
@@ -304,7 +306,7 @@ getAgentSessions cfg name = do
 -- Returns Nothing if no active session or session is stale
 getActiveSession :: ClientConfig -> Text -> IO (Either ClientError (Maybe ActiveSession))
 getActiveSession cfg name = do
-  result <- httpGetRaw cfg $ "/api/agents/" <> T.unpack name <> "/active-session"
+  result <- httpGetRaw cfg $ "/api/agents/" <> encodePathSegment name <> "/active-session"
   pure $ case result of
     Left e -> Left e
     Right body ->
@@ -330,6 +332,10 @@ httpGetRaw cfg path = do
          then pure $ Right $ responseBody response
          else pure $ Left $ ServerError code $ T.pack $ show $ responseBody response
 
--- Helper
+-- Helpers
 toList :: Foldable t => t a -> [a]
 toList = foldr (:) []
+
+-- | URL-encode a path segment (e.g., "wisp/concierge" -> "wisp%2Fconcierge")
+encodePathSegment :: Text -> String
+encodePathSegment = T.unpack . TE.decodeUtf8 . urlEncode True . TE.encodeUtf8
