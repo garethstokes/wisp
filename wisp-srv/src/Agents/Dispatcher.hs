@@ -20,7 +20,7 @@ import Domain.Id (EntityId)
 import App.Monad (App)
 import Agents.Core (Agent(..), loadAgentByTenant, buildSystemPrompt, loadSkillPromptByTenant, executeTool, ToolExecutionResult(..))
 import Agents.Run (RunContext, withRunLogging, callClaudeLogged, logToolRequest, logToolSuccess, logToolFailure)
-import Services.Knowledge (getKnowledgeContext)
+import Services.Knowledge (getKnowledgeContext, detectNoteCommand, captureNote)
 import Infra.Db.Activity (searchTagsByTenant)
 import qualified Skills.Registry as SkillsRegistry
 import Data.Aeson (Value, decode, encode)
@@ -47,7 +47,37 @@ dispatchChatStreaming
   -> Maybe Text                 -- ^ Optional session id for run logging
   -> (ChatEvent -> IO ())       -- ^ Stream callback
   -> App (Either Text ChatResponse)
-dispatchChatStreaming tenantId accountId agentName msgs mTimezone mSessionId emit = do
+dispatchChatStreaming tenantId _accountId agentName msgs _mTimezone _mSessionId _emit = do
+  -- Check if last message is a note command
+  let lastUserMsg = getLastUserMessage msgs
+  case lastUserMsg >>= detectNoteCommand of
+    Just noteContent -> do
+      -- Capture the note directly, skip agent
+      _ <- captureNote tenantId noteContent (Just agentName)
+      pure $ Right ChatResponse
+        { responseMessage = "Got it! I've noted: \"" <> noteContent <> "\""
+        , responseToolCall = Nothing
+        }
+    Nothing -> dispatchChatNormal tenantId _accountId agentName msgs _mTimezone _mSessionId _emit
+  where
+    getLastUserMessage :: [ChatMessage] -> Maybe Text
+    getLastUserMessage messages =
+      case filter isUserMessage messages of
+        [] -> Nothing
+        ms -> Just $ messageContent $ last ms
+    isUserMessage msg = messageRole msg == "user"
+
+-- | Normal chat dispatch (when not a note command)
+dispatchChatNormal
+  :: TenantId
+  -> EntityId
+  -> Text
+  -> [ChatMessage]
+  -> Maybe Text
+  -> Maybe Text
+  -> (ChatEvent -> IO ())
+  -> App (Either Text ChatResponse)
+dispatchChatNormal tenantId accountId agentName msgs mTimezone mSessionId emit = do
   -- Load the agent from knowledge
   mAgent <- loadAgentByTenant tenantId agentName
   case mAgent of
