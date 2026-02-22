@@ -21,6 +21,7 @@ data Session = Session
   , sessionCreatedAt :: UTCTime
   , sessionEndedAt :: Maybe UTCTime
   , sessionSummarized :: Bool
+  , sessionLastMessageAt :: UTCTime
   } deriving (Eq, Show)
 
 instance ToJSON Session where
@@ -31,6 +32,7 @@ instance ToJSON Session where
     , "created_at" .= sessionCreatedAt s
     , "ended_at" .= sessionEndedAt s
     , "summarized" .= sessionSummarized s
+    , "last_message_at" .= sessionLastMessageAt s
     ]
 
 instance FromJSON Session where
@@ -41,6 +43,7 @@ instance FromJSON Session where
     <*> v .: "created_at"
     <*> v .:? "ended_at"
     <*> v .: "summarized"
+    <*> v .: "last_message_at"
 
 data NewSession = NewSession
   { newSessionAgentId :: Text
