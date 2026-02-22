@@ -1,17 +1,21 @@
 -- | Knowledge Service
 -- Assembles knowledge context (projects, notes, preferences) for agent prompts.
+-- Also handles note capture from chat messages.
 module Services.Knowledge
   ( getKnowledgeContext
   , formatKnowledgeContext
   , KnowledgeContext(..)
+  , detectNoteCommand
+  , captureNote
   ) where
 
-import Data.Aeson (Result(..), fromJSON)
+import Data.Aeson (Result(..), fromJSON, toJSON)
 import Data.Text (Text)
 import qualified Data.Text as T
-import Domain.Document (Document(..), DocumentType(..), NoteData(..), ProjectData(..), PreferenceData(..))
+import Domain.Document (Document(..), DocumentType(..), NoteData(..), ProjectData(..), PreferenceData(..), NewDocument(..))
 import Domain.Tenant (TenantId)
-import Infra.Db.Document (getDocumentsByType, getDocumentsByTags)
+import Domain.Id (EntityId)
+import Infra.Db.Document (getDocumentsByType, getDocumentsByTags, insertDocument)
 import App.Monad (App)
 
 -- | Knowledge context to inject into agent prompts
@@ -74,3 +78,31 @@ formatKnowledgeContext kc = T.unlines
     formatNote doc = case fromJSON (documentData doc) of
       Success (nd :: NoteData) -> "- " <> noteTitle nd <> " [" <> T.intercalate ", " (documentTags doc) <> "]"
       Error _ -> "- (unknown note)"
+
+-- | Check if a message is a note command
+-- Recognizes "Note: ..." and "Remember: ..." prefixes
+-- Returns the note content with prefix stripped
+detectNoteCommand :: Text -> Maybe Text
+detectNoteCommand msg
+  | "note:" `T.isPrefixOf` T.toLower msg = Just $ T.strip $ T.drop 5 msg
+  | "remember:" `T.isPrefixOf` T.toLower msg = Just $ T.strip $ T.drop 9 msg
+  | otherwise = Nothing
+
+-- | Capture a note from chat
+-- Creates a document with the note content as both title and body
+captureNote :: TenantId -> Text -> Maybe Text -> App EntityId
+captureNote tenantId noteContent mAgentId = do
+  let noteData = NoteData
+        { noteTitle = noteContent
+        , noteContent = Nothing  -- Title is the content for simple notes
+        }
+      newDoc = NewDocument
+        { newDocTenantId = Just tenantId
+        , newDocType = NoteDoc
+        , newDocData = toJSON noteData
+        , newDocTags = []  -- TODO: extract tags from content
+        , newDocConfidence = Just 0.9
+        , newDocSource = mAgentId
+        , newDocSupersedesId = Nothing
+        }
+  insertDocument newDoc
