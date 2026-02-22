@@ -100,9 +100,7 @@ renderActivityRow mNow selected idx act =
         , txt icon
         , txt " "
         , padRight Max $ txt title
-        , txt " "
-        , txt rightMeta
-        , txt " "
+        , txt $ " " <> rightMeta <> "  "
         ]
 
 -- | Icon for urgency level
