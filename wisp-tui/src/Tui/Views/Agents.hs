@@ -60,29 +60,24 @@ agentDetailWidget :: AgentInfo -> [SessionSummary] -> Widget Name
 agentDetailWidget agent sessions = vBox
   [ txt $ "Agent: " <> agentName agent
   , txt $ "Active Skill: " <> fromMaybe "(none)" (agentActiveSkill agent)
-  , txt ""
-  , txt "Personality:"
+  , padTop (Pad 1) $ txt "Personality:"
   , txt "------------"
   , txtWrap $ agentPersonality agent
-  , txt ""
   , soulSection (agentSoul agent)
-  , txt ""
   , sessionsSection sessions
-  , txt ""
-  , txt "Available Skills:"
+  , padTop (Pad 1) $ txt "Available Skills:"
   , txt "-----------------"
   , vBox $ map (\s -> txt $ "  - " <> s) (agentAvailableSkills agent)
   ]
 
 soulSection :: AgentSoul -> Widget Name
 soulSection soul = vBox
-  [ txt "Soul:"
+  [ padTop (Pad 1) $ txt "Soul:"
   , txt "-----"
   , if T.null (soulPersonality soul)
     then txt "  (no evolved personality yet)"
     else txtWrap $ "  " <> soulPersonality soul
-  , txt ""
-  , txt "Insights:"
+  , padTop (Pad 1) $ txt "Insights:"
   , if null (soulInsights soul)
     then txt "  (no insights yet)"
     else vBox $ map (\i -> txtWrap $ "  - " <> i) (soulInsights soul)
@@ -90,7 +85,7 @@ soulSection soul = vBox
 
 sessionsSection :: [SessionSummary] -> Widget Name
 sessionsSection sessions = vBox
-  [ txt "Recent Sessions:"
+  [ padTop (Pad 1) $ txt "Recent Sessions:"
   , txt "----------------"
   , if null sessions
     then txt "  (no sessions)"
