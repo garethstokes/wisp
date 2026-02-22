@@ -22,6 +22,8 @@ import Agents.Core (Agent(..), loadAgentByTenant, buildSystemPrompt, loadSkillPr
 import Agents.Run (RunContext, withRunLogging, callClaudeLogged, logToolRequest, logToolSuccess, logToolFailure)
 import Services.Knowledge (getKnowledgeContext, detectNoteCommand, captureNote)
 import Infra.Db.Activity (searchTagsByTenant)
+import qualified Infra.Db.Session as SessionDb
+import Domain.Session (Session(..), SessionId(..))
 import qualified Skills.Registry as SkillsRegistry
 import Data.Aeson (Value, decode, encode)
 import qualified Data.Aeson as Aeson
@@ -77,25 +79,65 @@ dispatchChatNormal
   -> Maybe Text
   -> (ChatEvent -> IO ())
   -> App (Either Text ChatResponse)
-dispatchChatNormal tenantId accountId agentName msgs mTimezone mSessionId emit = do
+dispatchChatNormal tenantId accountId agentName msgs mTimezone _mSessionIdFromClient emit = do
   -- Load the agent from knowledge
   mAgent <- loadAgentByTenant tenantId agentName
   case mAgent of
     Nothing -> pure $ Left $ "Unknown agent: " <> agentName
-    Just agent -> withRunLogging agentName mSessionId msgs $ \ctx messages -> do
-      -- Fetch knowledge context (including session summaries for this agent)
-      knowledgeCtx <- getKnowledgeContext tenantId agentName []  -- TODO: extract tags from messages
+    Just agent -> do
+      -- Get or create session (15 minute threshold)
+      (session, _isNew) <- SessionDb.getOrCreateActiveSession agentName (15 * 60)
+      let sid = sessionId session
 
-      -- Load skill prompt if skill is active
-      mSkillPrompt <- case agentSkill agent of
-        Nothing -> pure Nothing
-        Just skill -> loadSkillPromptByTenant tenantId (SkillsRegistry.skillName skill)
+      -- Append user message to session
+      case getLastUserMessage msgs of
+        Just userContent -> do
+          let userMsg = ChatMessage
+                { messageRole = "user"
+                , messageContent = userContent
+                , messageAgent = Nothing
+                , messageToolCall = Nothing
+                }
+          _ <- SessionDb.appendMessage sid userMsg
+          pure ()
+        Nothing -> pure ()
 
-      -- Build the system prompt with knowledge
-      let systemPrompt = buildSystemPrompt agent mSkillPrompt (Just knowledgeCtx)
+      -- Run with logging (pass session ID for run linkage)
+      withRunLogging agentName (Just $ unSessionId sid) msgs $ \ctx messages -> do
+        -- Fetch knowledge context (including session summaries for this agent)
+        knowledgeCtx <- getKnowledgeContext tenantId agentName []  -- TODO: extract tags from messages
 
-      -- Run the agentic loop
-      runAgentLoop ctx agent accountId systemPrompt messages [] mTimezone emit
+        -- Load skill prompt if skill is active
+        mSkillPrompt <- case agentSkill agent of
+          Nothing -> pure Nothing
+          Just skill -> loadSkillPromptByTenant tenantId (SkillsRegistry.skillName skill)
+
+        -- Build the system prompt with knowledge
+        let systemPrompt = buildSystemPrompt agent mSkillPrompt (Just knowledgeCtx)
+
+        -- Run the agentic loop
+        result <- runAgentLoop ctx agent accountId systemPrompt messages [] mTimezone emit
+
+        -- Append assistant response to session
+        case result of
+          Right response -> do
+            let assistantMsg = ChatMessage
+                  { messageRole = "assistant"
+                  , messageContent = responseMessage response
+                  , messageAgent = Just agentName
+                  , messageToolCall = responseToolCall response
+                  }
+            _ <- SessionDb.appendMessage sid assistantMsg
+            pure ()
+          Left _ -> pure ()
+
+        pure result
+  where
+    getLastUserMessage :: [ChatMessage] -> Maybe Text
+    getLastUserMessage messages =
+      case filter (\m -> messageRole m == "user") messages of
+        [] -> Nothing
+        ms -> Just $ messageContent $ last ms
 
 -- | Agentic loop: call LLM, execute tools, feed results back, repeat until done
 runAgentLoop
