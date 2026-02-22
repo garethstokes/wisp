@@ -28,6 +28,7 @@ instance FromRow Session where
     <*> field
     <*> field
     <*> field
+    <*> field  -- last_message_at
     where
       parseMessages :: Value -> [ChatMessage]
       parseMessages v = case decode (encode v) of
@@ -40,8 +41,8 @@ createSession agentId = do
   sid <- liftIO $ unEntityId <$> newEntityId
   now <- liftIO getCurrentTime
   _ <- liftIO $ execute conn
-    "insert into sessions (id, agent_id, messages, created_at) values (?, ?, '[]', ?)"
-    (sid, agentId, now)
+    "insert into sessions (id, agent_id, messages, created_at, last_message_at) values (?, ?, '[]', ?, ?)"
+    (sid, agentId, now, now)
   pure Session
     { sessionId = SessionId sid
     , sessionAgentId = agentId
@@ -49,13 +50,14 @@ createSession agentId = do
     , sessionCreatedAt = now
     , sessionEndedAt = Nothing
     , sessionSummarized = False
+    , sessionLastMessageAt = now
     }
 
 getSession :: SessionId -> App (Maybe Session)
 getSession sid = do
   conn <- getConn
   results <- liftIO $ query conn
-    "select id, agent_id, messages, created_at, ended_at, summarized \
+    "select id, agent_id, messages, created_at, ended_at, summarized, last_message_at \
     \from sessions where id = ?"
     (Only $ unSessionId sid)
   pure $ case results of
@@ -66,7 +68,7 @@ getActiveSession :: Text -> App (Maybe Session)
 getActiveSession agentId = do
   conn <- getConn
   results <- liftIO $ query conn
-    "select id, agent_id, messages, created_at, ended_at, summarized \
+    "select id, agent_id, messages, created_at, ended_at, summarized, last_message_at \
     \from sessions where agent_id = ? and ended_at is null \
     \order by created_at desc limit 1"
     (Only agentId)
@@ -78,7 +80,7 @@ getRecentSessions :: Text -> Int -> App [Session]
 getRecentSessions agentId limit = do
   conn <- getConn
   liftIO $ query conn
-    "select id, agent_id, messages, created_at, ended_at, summarized \
+    "select id, agent_id, messages, created_at, ended_at, summarized, last_message_at \
     \from sessions where agent_id = ? \
     \order by created_at desc limit ?"
     (agentId, limit)
@@ -86,9 +88,10 @@ getRecentSessions agentId limit = do
 appendMessage :: SessionId -> ChatMessage -> App Session
 appendMessage sid msg = do
   conn <- getConn
+  now <- liftIO getCurrentTime
   _ <- liftIO $ execute conn
-    "update sessions set messages = messages || ?::jsonb where id = ?"
-    (encode [msg], unSessionId sid)
+    "update sessions set messages = messages || ?::jsonb, last_message_at = ? where id = ?"
+    (encode [msg], now, unSessionId sid)
   mSession <- getSession sid
   case mSession of
     Just s -> pure s
@@ -115,7 +118,7 @@ getUnsummarizedSessions :: Text -> App [Session]
 getUnsummarizedSessions agentId = do
   conn <- getConn
   liftIO $ query conn
-    "select id, agent_id, messages, created_at, ended_at, summarized \
+    "select id, agent_id, messages, created_at, ended_at, summarized, last_message_at \
     \from sessions \
     \where agent_id = ? and ended_at is not null and not summarized \
     \order by created_at"
