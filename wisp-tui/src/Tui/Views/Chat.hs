@@ -43,8 +43,13 @@ messagesWidget cs = viewport ChatHistory Vertical $ vBox $
 renderMessage :: ChatMessage -> Widget Name
 renderMessage msg = padBottom (Pad 1) $ vBox
   [ withAttr (roleAttr $ cmRole msg) $ txt $ "[" <> cmRole msg <> "]"
-  , padLeft (Pad 2) $ txtWrap (cmContent msg)
+  , padLeft (Pad 2) $ renderMultiline (cmContent msg)
   ]
+
+-- | Render text with proper newline handling
+renderMultiline :: Text -> Widget Name
+renderMultiline content =
+  vBox $ map txtWrap $ T.splitOn "\n" content
 
 roleAttr :: Text -> AttrName
 roleAttr "You" = attrName "userRole"
@@ -53,7 +58,7 @@ roleAttr _ = attrName "assistantRole"
 streamingIndicator :: ChatState -> [Widget Name]
 streamingIndicator cs
   | cs ^. csStreaming =
-      [ txt $ cs ^. csStreamBuffer
+      [ renderMultiline $ cs ^. csStreamBuffer
       , withAttr (attrName "cursor") $ txt "▌"
       ]
   | otherwise = []
