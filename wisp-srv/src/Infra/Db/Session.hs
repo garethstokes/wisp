@@ -2,6 +2,8 @@ module Infra.Db.Session
   ( createSession
   , getSession
   , getActiveSession
+  , getOrCreateActiveSession
+  , getActiveSessionWithinThreshold
   , getRecentSessions
   , appendMessage
   , endSession
@@ -12,7 +14,7 @@ module Infra.Db.Session
 import Control.Monad.IO.Class (liftIO)
 import Data.Aeson (encode, decode, Value)
 import Data.Text (Text)
-import Data.Time (getCurrentTime)
+import Data.Time (getCurrentTime, UTCTime, NominalDiffTime, diffUTCTime)
 import Database.PostgreSQL.Simple
 import Database.PostgreSQL.Simple.FromRow
 import Domain.Id (newEntityId, unEntityId)
@@ -74,6 +76,32 @@ getActiveSession agentId = do
     (Only agentId)
   pure $ case results of
     [s] -> Just s
+    _ -> Nothing
+
+-- | Get active session if last message within threshold, otherwise create new.
+-- Returns (session, isNew) where isNew indicates if a fresh session was created.
+getOrCreateActiveSession :: Text -> NominalDiffTime -> App (Session, Bool)
+getOrCreateActiveSession agentId threshold = do
+  now <- liftIO getCurrentTime
+  mActive <- getActiveSessionWithinThreshold agentId threshold now
+  case mActive of
+    Just session -> pure (session, False)
+    Nothing -> do
+      session <- createSession agentId
+      pure (session, True)
+
+-- | Get active session only if last message was within threshold
+getActiveSessionWithinThreshold :: Text -> NominalDiffTime -> UTCTime -> App (Maybe Session)
+getActiveSessionWithinThreshold agentId threshold now = do
+  conn <- getConn
+  results <- liftIO $ query conn
+    "select id, agent_id, messages, created_at, ended_at, summarized, last_message_at \
+    \from sessions \
+    \where agent_id = ? and ended_at is null \
+    \order by last_message_at desc limit 1"
+    (Only agentId)
+  pure $ case results of
+    [s] | diffUTCTime now (sessionLastMessageAt s) <= threshold -> Just s
     _ -> Nothing
 
 getRecentSessions :: Text -> Int -> App [Session]
