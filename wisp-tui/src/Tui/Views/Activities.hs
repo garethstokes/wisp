@@ -86,23 +86,23 @@ renderActivityRow mNow selected idx act =
   let isSelected = idx == selected
       marker = if isSelected then "> " else "  "
       icon = sourceIcon (activitySource act)
-      title = maybe (T.take 60 $ activityRaw act) id (activityTitle act)
+      title = maybe (T.take 80 $ activityRaw act) id (activityTitle act)
       timeAgo = maybe "" (relativeTime (activityCreatedAt act)) mNow
       -- Classification info
       conf = maybe "" (\c -> T.pack (show (round (c * 100) :: Int)) <> "%") (activityConfidence act)
       urgency = maybe "" urgencyIcon (activityUrgency act)
       tier = maybe "" (\t -> "T" <> T.pack (show t)) (activityAutonomyTier act)
       tags = if null (activityTags act) then "" else T.intercalate "," (take 2 $ activityTags act)
-      -- Build metadata string
-      meta = T.intercalate " " $ filter (not . T.null) [urgency, tier, conf, tags]
+      -- Build right-side metadata: urgency tier% tags timeAgo
+      rightMeta = T.intercalate " " $ filter (not . T.null) [urgency, tier, conf, tags, timeAgo]
   in hBox
         [ txt marker
         , txt icon
         , txt " "
-        , hLimit 65 $ txt title
+        , padRight Max $ txt title
         , txt " "
-        , hLimit 20 $ txt meta
-        , padLeft Max $ txt $ timeAgo <> " "
+        , txt rightMeta
+        , txt " "
         ]
 
 -- | Icon for urgency level
