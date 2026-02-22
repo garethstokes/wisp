@@ -66,6 +66,7 @@ import Data.Time (UTCTime)
 import Lens.Micro.TH (makeLenses)
 
 import Wisp.Client (ClientConfig, Activity, ActivityMetrics, Document, Skill, AgentInfo, SessionSummary)
+import qualified Wisp.Client as WC
 import Wisp.Client.SSE (ChatEvent)
 
 -- | Resource names for brick
@@ -93,6 +94,7 @@ data AppEvent
   | SkillsLoaded [Skill]
   | AgentsLoaded [AgentInfo]
   | AgentSessionsLoaded Text [SessionSummary]  -- agent name, sessions
+  | ChatSessionLoaded (Maybe (Text, [WC.ChatMessage]))  -- sessionId, messages
   | ApprovalsLoaded [(Activity, Text, Text)]
   | LoadError Text
   | RefreshView View

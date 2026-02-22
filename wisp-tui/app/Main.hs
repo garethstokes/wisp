@@ -24,6 +24,7 @@ import Tui.Views.Knowledge (knowledgeWidget, handleKnowledgeEvent)
 import Tui.Views.Skills (skillsWidget, handleSkillsEvent)
 import Tui.Widgets.Layout (headerWidget, statusBarWidget)
 import Wisp.Client (defaultConfig, AgentInfo(..))
+import qualified Wisp.Client as WC
 
 main :: IO ()
 main = do
@@ -56,6 +57,13 @@ main = do
         , _statusMessage = Just ("Welcome to wisp-tui | Ctrl-Q to quit", now, StatusInfo)
         , _currentTime = Just now
         }
+
+  -- Load chat session on startup (async)
+  void $ async $ do
+    result <- DL.loadChatSession defaultConfig "wisp/concierge"
+    case result of
+      DL.ChatSessionLoaded mSession -> writeBChan chan (ChatSessionLoaded mSession)
+      _ -> pure ()
 
   -- Build vty
   let buildVty = V.mkVty V.defaultConfig
@@ -142,6 +150,22 @@ handleEvent _ (AppEvent (AgentSessionsLoaded _name sessions)) = do
 handleEvent _ (AppEvent (ApprovalsLoaded items)) = do
   modify $ approvalsState . apsItems .~ items
   modify $ approvalsState . apsSelected .~ 0
+handleEvent _ (AppEvent (ChatSessionLoaded mSession)) = do
+  now <- liftIO getCurrentTime
+  case mSession of
+    Just (sessionId, wcMessages) -> do
+      -- Convert WC.ChatMessage to TUI ChatMessage
+      let tuiMessages = [ ChatMessage (roleToDisplay (WC.cmRole m)) (WC.cmContent m) now
+                        | m <- wcMessages
+                        ]
+      modify $ chatState . csMessages .~ tuiMessages
+      modify $ chatState . csCurrentSession .~ sessionId
+      modify $ statusMessage .~ Just ("Resumed session with " <> T.pack (show (length tuiMessages)) <> " messages", now, StatusInfo)
+    Nothing -> pure ()
+  where
+    roleToDisplay "user" = "You"
+    roleToDisplay "assistant" = "Assistant"
+    roleToDisplay r = r
 handleEvent _ (AppEvent (LoadError _msg)) = do
   -- Could show error in status bar
   pure ()
@@ -210,6 +234,8 @@ triggerDataLoad chan = do
         writeBChan chan (AgentSessionsLoaded name sessions)
       DL.ApprovalsLoaded items ->
         writeBChan chan (ApprovalsLoaded items)
+      DL.ChatSessionLoaded mSession ->
+        writeBChan chan (ChatSessionLoaded mSession)
       DL.LoadError msg ->
         writeBChan chan (LoadError msg)
 
