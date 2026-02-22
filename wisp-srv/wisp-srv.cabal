@@ -102,6 +102,7 @@ executable wisp-srv
         Services.Router
         Services.Scheduler
         Services.ClassificationQueue
+        Services.Knowledge
         Services.Notification
         Services.NotificationLoop
     build-depends:
