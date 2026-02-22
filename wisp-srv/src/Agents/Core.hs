@@ -24,6 +24,7 @@ import Skills.Registry (Skill(..), ToolDef(..), SkillToolResult(..), getSkill, e
 import Skills.Base (baseToolNames, baseToolNamesWithSkill, parseBaseToolCall, executeBaseTool, BaseToolResult(..))
 import Infra.Db.Activity (getActivitiesByTagsTenant)
 import Infra.Db.Soul (getOrCreateSoul)
+import Services.Knowledge (KnowledgeContext, formatKnowledgeContext)
 import App.Monad (App)
 
 -- | A loaded agent ready for interaction
@@ -57,9 +58,9 @@ loadAgentByTenant tenantId name = do
         }
 
 -- | Build system prompt for an agent
--- Combines personality, soul insights, and skill prompt
-buildSystemPrompt :: Agent -> Maybe Text -> Text
-buildSystemPrompt agent mSkillPrompt = T.unlines
+-- Combines personality, soul insights, knowledge context, and skill prompt
+buildSystemPrompt :: Agent -> Maybe Text -> Maybe KnowledgeContext -> Text
+buildSystemPrompt agent mSkillPrompt mKnowledge = T.unlines
   [ "You are " <> agentName agent <> ", a personal assistant."
   , ""
   , "## Your Personality"
@@ -68,6 +69,8 @@ buildSystemPrompt agent mSkillPrompt = T.unlines
     else agentPersonalitySeed (agentConfig agent)
   , ""
   , buildSoulSection (agentSoul agent)
+  , ""
+  , maybe "" formatKnowledgeContext mKnowledge
   , ""
   , "## Response Format"
   , "CRITICAL: You MUST respond with ONLY valid JSON. No markdown, no explanation, no text outside JSON."

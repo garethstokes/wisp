@@ -20,6 +20,7 @@ import Domain.Id (EntityId)
 import App.Monad (App)
 import Agents.Core (Agent(..), loadAgentByTenant, buildSystemPrompt, loadSkillPromptByTenant, executeTool, ToolExecutionResult(..))
 import Agents.Run (RunContext, withRunLogging, callClaudeLogged, logToolRequest, logToolSuccess, logToolFailure)
+import Services.Knowledge (getKnowledgeContext)
 import Infra.Db.Activity (searchTagsByTenant)
 import qualified Skills.Registry as SkillsRegistry
 import Data.Aeson (Value, decode, encode)
@@ -52,13 +53,16 @@ dispatchChatStreaming tenantId accountId agentName msgs mTimezone mSessionId emi
   case mAgent of
     Nothing -> pure $ Left $ "Unknown agent: " <> agentName
     Just agent -> withRunLogging agentName mSessionId msgs $ \ctx messages -> do
+      -- Fetch knowledge context
+      knowledgeCtx <- getKnowledgeContext tenantId []  -- TODO: extract tags from messages
+
       -- Load skill prompt if skill is active
       mSkillPrompt <- case agentSkill agent of
         Nothing -> pure Nothing
         Just skill -> loadSkillPromptByTenant tenantId (SkillsRegistry.skillName skill)
 
-      -- Build the system prompt
-      let systemPrompt = buildSystemPrompt agent mSkillPrompt
+      -- Build the system prompt with knowledge
+      let systemPrompt = buildSystemPrompt agent mSkillPrompt (Just knowledgeCtx)
 
       -- Run the agentic loop
       runAgentLoop ctx agent accountId systemPrompt messages [] mTimezone emit
