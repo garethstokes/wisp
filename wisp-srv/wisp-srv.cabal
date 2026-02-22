@@ -104,6 +104,7 @@ executable wisp-srv
         Services.ClassificationQueue
         Services.Knowledge
         Services.Notification
+        Services.Summarizer
         Services.NotificationLoop
     build-depends:
         base >=4.17 && <5,
