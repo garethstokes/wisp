@@ -21,6 +21,7 @@ module Wisp.Client
   , getAgents
   , getAgent
   , getAgentSessions
+  , getActiveSession
     -- * Re-exports
   , module Wisp.Client.Types
   , module Wisp.Client.Activities
@@ -33,6 +34,7 @@ import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KM
 import Data.Text (Text)
 import qualified Data.Text as T
+import qualified Data.ByteString.Lazy as BL
 import Network.HTTP.Client
 import Network.HTTP.Types.Status (statusCode)
 
@@ -297,6 +299,36 @@ getAgentSessions cfg name = do
           _ -> Left $ ParseError "Failed to parse sessions"
         _ -> Left $ ParseError "Missing sessions key"
       _ -> Left $ ParseError "Expected object"
+
+-- | Get active session for an agent (if within 15 min threshold)
+-- Returns Nothing if no active session or session is stale
+getActiveSession :: ClientConfig -> Text -> IO (Either ClientError (Maybe ActiveSession))
+getActiveSession cfg name = do
+  result <- httpGetRaw cfg $ "/api/agents/" <> T.unpack name <> "/active-session"
+  pure $ case result of
+    Left e -> Left e
+    Right body ->
+      -- Server returns null for no active session
+      if body == "null" || body == ""
+        then Right Nothing
+        else case decode body of
+          Just session -> Right (Just session)
+          Nothing -> Left $ ParseError "Failed to parse active session"
+
+-- | Make a GET request returning raw response body
+httpGetRaw :: ClientConfig -> String -> IO (Either ClientError BL.ByteString)
+httpGetRaw cfg path = do
+  manager <- newManager defaultManagerSettings
+  result <- try $ do
+    req <- parseRequest $ T.unpack (configBaseUrl cfg) <> path
+    httpLbs req manager
+  case result of
+    Left (e :: SomeException) -> pure $ Left $ HttpError $ T.pack $ show e
+    Right response ->
+      let code = statusCode $ responseStatus response
+      in if code >= 200 && code < 300
+         then pure $ Right $ responseBody response
+         else pure $ Left $ ServerError code $ T.pack $ show $ responseBody response
 
 -- Helper
 toList :: Foldable t => t a -> [a]

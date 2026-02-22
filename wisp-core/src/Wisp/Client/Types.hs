@@ -10,6 +10,8 @@ module Wisp.Client.Types
   , AgentSoul(..)
     -- * Session types
   , SessionSummary(..)
+  , ActiveSession(..)
+  , ChatMessage(..)
   ) where
 
 import Data.Aeson (FromJSON(..), ToJSON(..), Value, withObject, (.:), (.:?), object, (.=))
@@ -121,4 +123,50 @@ instance ToJSON SessionSummary where
     , "message_count" .= sessionMessageCount s
     , "created_at" .= sessionCreatedAt s
     , "ended_at" .= sessionEndedAt s
+    ]
+
+-- | Chat message (for session messages)
+data ChatMessage = ChatMessage
+  { cmRole :: Text
+  , cmContent :: Text
+  , cmAgent :: Maybe Text
+  } deriving (Show, Eq)
+
+instance FromJSON ChatMessage where
+  parseJSON = withObject "ChatMessage" $ \v -> ChatMessage
+    <$> v .: "role"
+    <*> v .: "content"
+    <*> v .:? "agent"
+
+instance ToJSON ChatMessage where
+  toJSON m = object
+    [ "role" .= cmRole m
+    , "content" .= cmContent m
+    , "agent" .= cmAgent m
+    ]
+
+-- | Active session with full messages (for TUI resume)
+data ActiveSession = ActiveSession
+  { asId :: Text
+  , asAgentId :: Text
+  , asMessages :: [ChatMessage]
+  , asCreatedAt :: UTCTime
+  , asLastMessageAt :: UTCTime
+  } deriving (Show, Eq)
+
+instance FromJSON ActiveSession where
+  parseJSON = withObject "ActiveSession" $ \v -> ActiveSession
+    <$> v .: "id"
+    <*> v .: "agent_id"
+    <*> v .: "messages"
+    <*> v .: "created_at"
+    <*> v .: "last_message_at"
+
+instance ToJSON ActiveSession where
+  toJSON s = object
+    [ "id" .= asId s
+    , "agent_id" .= asAgentId s
+    , "messages" .= asMessages s
+    , "created_at" .= asCreatedAt s
+    , "last_message_at" .= asLastMessageAt s
     ]
