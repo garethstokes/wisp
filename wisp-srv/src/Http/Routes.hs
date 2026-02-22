@@ -7,7 +7,7 @@ import Web.Scotty.Trans (ScottyT, get, post, put)
 import Http.Handlers.Agents (getAgentsList, getAgentByName, getAgentSessions, postAgentActivateSkill, postAgentDeactivate)
 import Http.Handlers.Auth (getGoogleAuth, getGoogleCallback, getGitHubAuth, getGitHubCallback, getAuthStatus)
 import Http.Handlers.Health (getHealth)
-import Http.Handlers.Activities (getActivities, getActivityStats, getActivityById, getActivityLogs, getInbox, getReview, approveActivity, dismissActivity, triggerPoll, backfillGitHubDiffs)
+import Http.Handlers.Activities (getActivities, getActivityStats, getActivityById, getActivityLogs, getInbox, getReview, approveActivity, dismissActivity, triggerPoll, backfillGitHubDiffs, summarizeSessions)
 import Http.Handlers.Chat (postChat)
 import Http.Handlers.ChatStream (postChatStream)
 import Http.Handlers.People (getPeople, getPersonById)
@@ -64,6 +64,7 @@ routes = do
 
   -- Admin actions
   post "/admin/backfill-github-diffs" backfillGitHubDiffs
+  post "/admin/summarize-sessions/:agent" summarizeSessions
 
   -- People
   get "/people" getPeople

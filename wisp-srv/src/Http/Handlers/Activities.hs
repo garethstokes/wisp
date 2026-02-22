@@ -10,6 +10,7 @@ module Http.Handlers.Activities
   , dismissActivity
   , triggerPoll
   , backfillGitHubDiffs
+  , summarizeSessions
   ) where
 
 import Control.Monad.Reader (ReaderT)
@@ -28,6 +29,7 @@ import Infra.Db.Activity (getActivitiesByStatus, countActivitiesByStatus, getAct
 import Infra.Db.Receipt (getReceiptsForActivity)
 import Services.Scheduler (runPollCycle)
 import Services.GitHubPoller (backfillPushEventDiffs)
+import Services.Summarizer (summarizeUnsummarizedSessions)
 
 -- Convert Activity to JSON (full details including classification)
 activityToJson :: Activity -> Value
@@ -213,3 +215,10 @@ backfillGitHubDiffs = do
     [ "status" .= ("complete" :: Text)
     , "result" .= result
     ]
+
+-- POST /admin/summarize-sessions/:agent - Summarize unsummarized sessions for an agent
+summarizeSessions :: ActionT (ReaderT Env IO) ()
+summarizeSessions = do
+  agentId <- pathParam "agent"
+  lift $ summarizeUnsummarizedSessions agentId
+  json $ object ["status" .= ("summarization triggered" :: Text)]
