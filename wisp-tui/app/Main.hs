@@ -47,6 +47,7 @@ main = do
             , _csCurrentSession = "default"
             , _csStreaming = False
             , _csStreamBuffer = ""
+            , _csToolCalls = []
             }
         , _activitiesState = ActivitiesState [] 0 Nothing "" Nothing True False
         , _knowledgeState = KnowledgeState NotesTab [] [] 0 Nothing
