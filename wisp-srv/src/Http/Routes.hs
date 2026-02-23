@@ -15,7 +15,7 @@ import Http.Handlers.Pipeline (postRunPipeline, postClassifyActivity)
 import Http.Handlers.Runs (getRuns, getRunById)
 import Http.Handlers.Skills (getSkillsList, getSkillByName, putSkillPrompt)
 import Http.Handlers.Tenants (getTenantsList, postTenant, getTenantById)
-import Http.Handlers.Documents (getProjectsList, postProject, postProjectArchive, getNotesList, postNote, getPrefsList, postPref, getDocumentById, getDocumentLogHandler)
+import Http.Handlers.Documents (getProjectsList, postProject, postProjectArchive, postProjectReflect, getProjectSuggestions, getNotesList, postNote, getPrefsList, postPref, getDocumentById, getDocumentLogHandler)
 import App.Monad (Env)
 
 routes :: ScottyT (ReaderT Env IO) ()
@@ -87,6 +87,8 @@ routes = do
   get "/api/projects" getProjectsList
   post "/api/projects" postProject
   post "/api/projects/:id/archive" postProjectArchive
+  post "/api/projects/reflect" postProjectReflect
+  get "/api/projects/suggestions" getProjectSuggestions
   get "/api/notes" getNotesList
   post "/api/notes" postNote
   get "/api/preferences" getPrefsList

@@ -3,6 +3,8 @@ module Http.Handlers.Documents
   ( getProjectsList
   , postProject
   , postProjectArchive
+  , postProjectReflect
+  , getProjectSuggestions
   , getNotesList
   , postNote
   , getPrefsList
@@ -15,14 +17,16 @@ import Control.Monad.Reader (ReaderT)
 import Control.Monad.Trans.Class (lift)
 import Data.Aeson (FromJSON(..), ToJSON(..), object, withObject, (.:), (.:?), (.=))
 import Data.Text (Text)
+import qualified Data.Text as T
 import GHC.Generics (Generic)
 import Network.HTTP.Types.Status (status201, status404)
 import Web.Scotty.Trans (ActionT, json, jsonData, captureParam, status)
-import App.Monad (Env)
-import Domain.Id (EntityId(..))
+import App.Monad (Env, runApp)
+import Domain.Id (EntityId(..), unEntityId)
 import Domain.Document
 import qualified Data.Aeson as Aeson
 import qualified Infra.Db.Document as Db
+import Skills.Reflection (runProjectReflection, ReflectionResult(..), detectProjectClusters, ProjectSuggestion(..), ClusterKey(..))
 
 --------------------------------------------------------------------------------
 -- Request types
@@ -122,6 +126,44 @@ postProjectArchive = do
   docId <- captureParam "id"
   lift $ Db.archiveDocument (EntityId docId)
   json $ object ["status" .= ("archived" :: Text)]
+
+-- | POST /api/projects/reflect - run reflection on all projects
+postProjectReflect :: ActionT (ReaderT Env IO) ()
+postProjectReflect = do
+  results <- lift runProjectReflection
+  let response = object
+        [ "status" .= ("completed" :: Text)
+        , "projects_updated" .= length results
+        , "results" .= map resultToJson results
+        ]
+  json response
+  where
+    resultToJson :: ReflectionResult -> Aeson.Value
+    resultToJson r = object
+      [ "project_id" .= unEntityId (rrProjectId r)
+      , "summary" .= rrUpdatedSummary r
+      , "status" .= rrUpdatedStatus r
+      , "activities_processed" .= rrActivitiesProcessed r
+      ]
+
+-- | GET /api/projects/suggestions - get new project suggestions based on activity clusters
+getProjectSuggestions :: ActionT (ReaderT Env IO) ()
+getProjectSuggestions = do
+  suggestions <- lift detectProjectClusters
+  let response = object
+        [ "suggestions" .= map suggestionToJson suggestions
+        , "count" .= length suggestions
+        ]
+  json response
+  where
+    suggestionToJson :: ProjectSuggestion -> Aeson.Value
+    suggestionToJson s = object
+      [ "suggested_name" .= psSuggestedName s
+      , "cluster_key" .= unClusterKey (psClusterKey s)
+      , "reason" .= psReason s
+      , "sample_activity_ids" .= map unEntityId (psSampleActivityIds s)
+      , "activity_count" .= psActivityCount s
+      ]
 
 --------------------------------------------------------------------------------
 -- Note Endpoints

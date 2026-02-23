@@ -16,6 +16,7 @@ module Wisp.Client
   , dismissActivity
   , getApprovals
   , ApprovalItem(..)
+  , getProjectSuggestions
     -- * Skills and Agents
   , getSkills
   , getAgents
@@ -258,6 +259,20 @@ approveActivity cfg aid =
 dismissActivity :: ClientConfig -> Text -> IO (Either ClientError ())
 dismissActivity cfg aid =
   httpPost_ cfg ("/activities/" <> T.unpack aid <> "/dismiss") (object [])
+
+-- Project Suggestions
+getProjectSuggestions :: ClientConfig -> IO (Either ClientError [ProjectSuggestion])
+getProjectSuggestions cfg = do
+  result <- httpGet cfg "/api/projects/suggestions"
+  pure $ case result of
+    Left e -> Left e
+    Right val -> case val of
+      Aeson.Object obj -> case KM.lookup "suggestions" obj of
+        Just (Aeson.Array arr) -> case traverse Aeson.fromJSON arr of
+          Aeson.Success suggestions -> Right $ toList suggestions
+          _ -> Left $ ParseError "Failed to parse suggestions"
+        _ -> Left $ ParseError "Missing suggestions key"
+      _ -> Left $ ParseError "Expected object"
 
 -- Skills
 getSkills :: ClientConfig -> IO (Either ClientError [Skill])

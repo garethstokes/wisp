@@ -17,5 +17,6 @@ spec = describe "Session" $ do
             , sessionCreatedAt = read "2026-02-18 10:00:00 UTC"
             , sessionEndedAt = Nothing
             , sessionSummarized = False
+            , sessionLastMessageAt = read "2026-02-18 10:00:00 UTC"
             }
       unpack (encode session) `shouldContain` "\"agent_id\":\"wisp\""

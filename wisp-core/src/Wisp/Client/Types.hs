@@ -12,6 +12,8 @@ module Wisp.Client.Types
   , SessionSummary(..)
   , ActiveSession(..)
   , ChatMessage(..)
+    -- * Project suggestion types
+  , ProjectSuggestion(..)
   ) where
 
 import Data.Aeson (FromJSON(..), ToJSON(..), Value, withObject, (.:), (.:?), object, (.=))
@@ -169,4 +171,30 @@ instance ToJSON ActiveSession where
     , "messages" .= asMessages s
     , "created_at" .= asCreatedAt s
     , "last_message_at" .= asLastMessageAt s
+    ]
+
+-- | Project suggestion from cluster detection
+data ProjectSuggestion = ProjectSuggestion
+  { psSuggestedName :: Text
+  , psClusterKey :: Text  -- email domain
+  , psReason :: Text
+  , psSampleActivityIds :: [Text]
+  , psActivityCount :: Int
+  } deriving (Show, Eq)
+
+instance FromJSON ProjectSuggestion where
+  parseJSON = withObject "ProjectSuggestion" $ \v -> ProjectSuggestion
+    <$> v .: "suggested_name"
+    <*> v .: "cluster_key"
+    <*> v .: "reason"
+    <*> v .: "sample_activity_ids"
+    <*> v .: "activity_count"
+
+instance ToJSON ProjectSuggestion where
+  toJSON s = object
+    [ "suggested_name" .= psSuggestedName s
+    , "cluster_key" .= psClusterKey s
+    , "reason" .= psReason s
+    , "sample_activity_ids" .= psSampleActivityIds s
+    , "activity_count" .= psActivityCount s
     ]

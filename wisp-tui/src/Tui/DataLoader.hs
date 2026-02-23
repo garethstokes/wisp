@@ -24,12 +24,14 @@ import Wisp.Client
   , ActiveSession(..)
   , ChatMessage(..)
   , ApprovalItem(..)
+  , ProjectSuggestion
   , ActivitiesResponse(..)
   , getActivities
   , getActivitiesPage
   , getNotes
   , getPreferences
   , getApprovals
+  , getProjectSuggestions
   , getSkills
   , getAgents
   , getAgent
@@ -46,7 +48,7 @@ data DataLoadResult
   | AgentsLoaded [AgentInfo]
   | AgentSessionsLoaded Text [SessionSummary]
   | ChatSessionLoaded (Maybe (Text, [ChatMessage]))  -- sessionId, messages
-  | ApprovalsLoaded [(Activity, Text, Text)]
+  | ApprovalsLoaded [(Activity, Text, Text)] [ProjectSuggestion]
   | LoadError Text
   deriving (Show, Eq)
 
@@ -113,16 +115,20 @@ loadChatSession cfg agentName = do
     Right Nothing -> ChatSessionLoaded Nothing
     Right (Just session) -> ChatSessionLoaded $ Just (asId session, asMessages session)
 
--- | Load approvals from server
+-- | Load approvals from server (also fetches project suggestions)
 loadApprovals :: ClientConfig -> IO DataLoadResult
 loadApprovals cfg = do
-  result <- getApprovals cfg
-  pure $ case result of
+  approvalsResult <- getApprovals cfg
+  suggestionsResult <- getProjectSuggestions cfg
+  pure $ case approvalsResult of
     Left err -> LoadError $ "Failed to load approvals: " <> showError err
-    Right items -> ApprovalsLoaded
-      [ (approvalActivity item, approvalType item, approvalReason item)
-      | item <- items
-      ]
+    Right items ->
+      let approvalItems =
+            [ (approvalActivity item, approvalType item, approvalReason item)
+            | item <- items
+            ]
+          suggestions = either (const []) id suggestionsResult
+      in ApprovalsLoaded approvalItems suggestions
 
 showError :: ClientError -> Text
 showError (HttpError t) = t

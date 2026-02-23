@@ -33,6 +33,7 @@ data Command
   | Status
   | Poll
   | Classify
+  | Reflect                       -- Run project reflection
   | Inbox
   | Review
   | Approve Text
@@ -114,6 +115,7 @@ commandParser =
         <> command "people" (info (pure People) (progDesc "List contacts extracted from activities"))
         <> command "poll" (info (pure Poll) (progDesc "Fetch new emails and calendar events now"))
         <> command "classify" (info (pure Classify) (progDesc "Run classification on pending activities"))
+        <> command "reflect" (info (pure Reflect) (progDesc "Run project reflection (synthesize summaries from activities)"))
         <> command "auth" (info authParser (progDesc "Add an account via OAuth (google or github)"))
         <> command "runs" (info (pure Runs) (progDesc "List recent agent runs"))
         <> command "run" (info runParser (progDesc "Show full details for an agent run"))
@@ -336,6 +338,7 @@ main = do
     Status -> runStatus
     Poll -> runPoll
     Classify -> runClassify
+    Reflect -> runReflect
     Inbox -> runInbox tz
     Review -> runReview tz
     Approve aid -> runApprove aid
@@ -399,6 +402,7 @@ runHelp = do
   TIO.putStrLn "  people              List contacts from activities"
   TIO.putStrLn "  poll                Fetch new emails and events now"
   TIO.putStrLn "  classify            Run classification on pending activities"
+  TIO.putStrLn "  reflect             Run project reflection (synthesize summaries)"
   TIO.putStrLn "  auth google         Add a Google account via OAuth"
   TIO.putStrLn "  auth github         Add a GitHub account via OAuth"
   TIO.putStrLn "  runs                List recent agent runs"
@@ -1097,6 +1101,47 @@ runClassify = do
       TIO.putStrLn $ "Failed:    " <> showT failed <> " activities"
       TIO.putStrLn $ "Total:     " <> showT total <> " activities"
     _ -> TIO.putStrLn "Classification request sent"
+
+runReflect :: IO ()
+runReflect = do
+  TIO.putStrLn "Running project reflection..."
+  manager <- newManager defaultManagerSettings
+  initialReq <- parseRequest $ baseUrl <> "/api/projects/reflect"
+  let req = initialReq{method = "POST"}
+  response <- httpLbs req manager
+  case decode (responseBody response) of
+    Just (Object obj) -> do
+      let getNum key = case KM.lookup key obj of
+            Just (Number n) -> round n :: Int
+            _ -> 0
+      let projectsUpdated = getNum "projects_updated"
+      TIO.putStrLn $ "Projects updated: " <> showT projectsUpdated
+      -- Show details for each project
+      case KM.lookup "results" obj of
+        Just (Array results) | not (null results) -> do
+          TIO.putStrLn ""
+          TIO.putStrLn "Results:"
+          forM_ (toList results) showReflectionResult
+        _ -> return ()
+    _ -> TIO.putStrLn "Reflection request sent"
+
+showReflectionResult :: Value -> IO ()
+showReflectionResult (Object r) = do
+  let getId = case KM.lookup "project_id" r of
+        Just (String s) -> T.take 8 s
+        _ -> "?"
+  let getStatus = case KM.lookup "status" r of
+        Just (String s) -> s
+        _ -> "?"
+  let getActivities = case KM.lookup "activities_processed" r of
+        Just (Number n) -> round n :: Int
+        _ -> 0
+  let getSummary = case KM.lookup "summary" r of
+        Just (String s) -> if T.length s > 60 then T.take 60 s <> "..." else s
+        _ -> "(no summary)"
+  TIO.putStrLn $ "  [" <> getId <> "] " <> getStatus <> " (" <> showT getActivities <> " activities)"
+  TIO.putStrLn $ "    " <> getSummary
+showReflectionResult _ = return ()
 
 runPoll :: IO ()
 runPoll = do

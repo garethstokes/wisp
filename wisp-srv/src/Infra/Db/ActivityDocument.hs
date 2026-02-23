@@ -4,6 +4,7 @@ module Infra.Db.ActivityDocument
   , getActivityProjects
   , getDocumentActivities
   , unlinkActivityFromDocument
+  , getUnassignedActivities
   ) where
 
 import Control.Monad.IO.Class (liftIO)
@@ -14,10 +15,12 @@ import Database.PostgreSQL.Simple.ToField (toField, ToField(..))
 import Data.Text (Text)
 import qualified Data.Text as T
 import Domain.Id (EntityId(..), unEntityId)
+import Domain.Activity (Activity)
 import Domain.ActivityDocument
 import Domain.Document (Document)
 import App.Monad (App, getConn)
 import Infra.Db.Document ()  -- Import FromRow Document instance
+import Infra.Db.Activity (DbActivity(..))  -- Import FromRow Activity instance
 
 -- ToField instances
 instance ToField LinkSource where
@@ -107,3 +110,20 @@ unlinkActivityFromDocument actId docId rel = do
     "DELETE FROM activity_documents WHERE activity_id = ? AND document_id = ? AND relationship = ?"
     (unEntityId actId, unEntityId docId, rel)
   pure ()
+
+-- | Get activities that have no project link (for cluster detection)
+getUnassignedActivities :: Int -> App [Activity]
+getUnassignedActivities limit = do
+  conn <- getConn
+  results <- liftIO $ query conn
+    "SELECT a.id, a.account_id, a.source, a.source_id, a.raw, a.status, a.title, a.summary, \
+    \a.sender_email, a.starts_at, a.ends_at, a.created_at, \
+    \a.personas, a.activity_type, a.urgency, a.autonomy_tier, a.confidence, a.person_id, \
+    \a.tags, a.parent_id \
+    \FROM activities a \
+    \LEFT JOIN activity_documents ad ON a.id = ad.activity_id AND ad.relationship = 'project' \
+    \WHERE ad.activity_id IS NULL AND a.status = 'processed' AND a.sender_email IS NOT NULL \
+    \ORDER BY a.created_at DESC \
+    \LIMIT ?"
+    (Only limit)
+  pure $ map unDbActivity results

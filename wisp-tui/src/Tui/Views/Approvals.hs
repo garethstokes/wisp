@@ -11,7 +11,7 @@ import qualified Data.Text as T
 import Lens.Micro ((^.), (.~), (%~))
 
 import Tui.Types
-import Wisp.Client (Activity(..), ActivitySource(..), ActivityStatus(..))
+import Wisp.Client (Activity(..), ActivitySource(..), ActivityStatus(..), ProjectSuggestion(..))
 
 -- | Approvals view widget
 approvalsWidget :: ApprovalsState -> Widget Name
@@ -24,6 +24,7 @@ approvalsWidget as = case as ^. apsExpanded of
     [ queueHeader as
     , hBorder
     , approvalsList as
+    , suggestionsSection as
     , hBorder
     , helpBar
     ]
@@ -42,6 +43,25 @@ approvalsList as =
   then padAll 2 $ txt "No items pending approval. 🎉"
   else viewport ApprovalList Vertical $ vBox $
        zipWith (renderApproval (as ^. apsSelected) (as ^. apsExpanded)) [0..] (as ^. apsItems)
+
+suggestionsSection :: ApprovalsState -> Widget Name
+suggestionsSection as =
+  if null (as ^. apsSuggestions)
+  then emptyWidget
+  else vBox
+    [ txt ""
+    , txt $ T.replicate 80 "─"
+    , padBottom (Pad 1) $ txt $ " 💡 New Project Suggestions (" <> T.pack (show $ length $ as ^. apsSuggestions) <> " detected)"
+    , vBox $ map renderSuggestion (as ^. apsSuggestions)
+    ]
+
+renderSuggestion :: ProjectSuggestion -> Widget Name
+renderSuggestion s = hBox
+  [ txt "  "
+  , withAttr (attrName "suggestion") $ txt "📊 "
+  , padRight (Pad 1) $ txt $ psSuggestedName s
+  , withAttr (attrName "dim") $ txt $ "(" <> T.pack (show $ psActivityCount s) <> " activities from @" <> psClusterKey s <> ")"
+  ]
 
 renderApproval :: Int -> Maybe Int -> Int -> (Activity, Text, Text) -> Widget Name
 renderApproval selected _expanded idx (act, aType, _reason) =

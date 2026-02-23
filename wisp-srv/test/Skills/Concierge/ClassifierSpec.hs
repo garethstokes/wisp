@@ -1,7 +1,7 @@
 module Skills.Concierge.ClassifierSpec where
 
 import Test.Hspec
-import Skills.Concierge.Classifier (buildClassificationPrompt, parseClassificationResponse)
+import Skills.Concierge.Classifier (buildClassificationPrompt, buildClassificationPromptWithProjects, parseClassificationResponse)
 import Domain.Classification (Classification(..), ActivityType(..))
 import Data.Aeson (object, (.=))
 import qualified Data.Text as T
@@ -13,6 +13,32 @@ spec = describe "Classifier" $ do
       let raw = object ["snippet" .= ("Meeting tomorrow" :: String)]
       let prompt = buildClassificationPrompt "email" (Just "Re: Project Update") raw
       prompt `shouldSatisfy` \p -> "Project Update" `T.isInfixOf` p
+
+  describe "buildClassificationPromptWithProjects" $ do
+    it "includes known projects section when projects provided" $ do
+      let raw = object ["snippet" .= ("Meeting tomorrow" :: String)]
+      let projects = ["wisp", "lune", "super-it"]
+      let prompt = buildClassificationPromptWithProjects "email" (Just "Re: Wisp Update") raw projects
+      prompt `shouldSatisfy` \p -> "Known Projects" `T.isInfixOf` p
+      prompt `shouldSatisfy` \p -> "wisp" `T.isInfixOf` p
+      prompt `shouldSatisfy` \p -> "lune" `T.isInfixOf` p
+      prompt `shouldSatisfy` \p -> "super-it" `T.isInfixOf` p
+
+    it "includes projects field in JSON schema" $ do
+      let raw = object ["snippet" .= ("Hello" :: String)]
+      let prompt = buildClassificationPromptWithProjects "email" Nothing raw ["wisp"]
+      prompt `shouldSatisfy` \p -> "\"projects\"" `T.isInfixOf` p
+
+    it "includes project assignment guidelines" $ do
+      let raw = object []
+      let prompt = buildClassificationPromptWithProjects "email" Nothing raw ["wisp"]
+      prompt `shouldSatisfy` \p -> "Project Assignment Guidelines" `T.isInfixOf` p
+
+    it "still works with empty projects list" $ do
+      let raw = object ["subject" .= ("Test" :: String)]
+      let prompt = buildClassificationPromptWithProjects "email" (Just "Test") raw []
+      -- Should still be a valid prompt, just without projects section
+      prompt `shouldSatisfy` \p -> "classifying an incoming email" `T.isInfixOf` p
 
   describe "parseClassificationResponse" $ do
     it "parses valid JSON classification" $ do

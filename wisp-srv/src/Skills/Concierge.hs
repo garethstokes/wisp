@@ -36,6 +36,7 @@ import App.Config (Config(..), ClaudeConfig(..))
 import Domain.Activity (Activity(..), ActivityStatus)
 import qualified Domain.Activity as Activity
 import Domain.Classification (Classification(..))
+import Domain.ProjectClassification (ProjectAssignment(..))
 import Domain.Id (EntityId(..), unEntityId)
 import Domain.Person (Person(..))
 import Domain.Receipt (NewReceipt(..), ReceiptAction(..))
@@ -44,8 +45,9 @@ import Infra.Db.Person (searchPeople, getPersonByEmail)
 import Infra.Db.Receipt (insertReceipt)
 import Infra.Claude.Client (callClaudeWithSystem)
 import Agents.Run (RunContext(..), callClaudeLogged, logToolRequest, logToolSuccess, logToolFailure)
-import Skills.Concierge.Classifier (classifyActivity)
+import Skills.Concierge.Classifier (classifyActivityWithProjects)
 import Domain.Agent (AgentInfo(..), ToolInfo(..), ToolType(..))
+import Services.ProjectUpdater (linkAndUpdateProject)
 import Domain.Chat (ChatMessage(..), ChatResponse)
 import qualified Domain.Chat as Chat
 import Services.PeopleResolver (resolvePersonForActivity)
@@ -602,9 +604,9 @@ classifyAllPending limit = do
 -- Process a single activity through classify -> resolve -> route
 classifyPending :: Activity -> App (Either Text ActivityStatus)
 classifyPending activity = do
-  -- Step 1: Classify
+  -- Step 1: Classify (with project context)
   liftIO $ putStrLn $ "Classifying activity: " <> show (activityId activity)
-  classifyResult <- classifyActivity activity
+  classifyResult <- classifyActivityWithProjects activity
   case classifyResult of
     Left err -> do
       liftIO $ putStrLn $ "Classification failed: " <> T.unpack err
@@ -635,6 +637,12 @@ classifyPending activity = do
 
       -- Step 3: Update activity with classification
       updateActivityClassification (activityId activity) classification mPersonId
+
+      -- Step 3.5: Link activity to projects
+      forM_ (classificationProjects classification) $ \assignment -> do
+        liftIO $ putStrLn $ "Linking to project: " <> T.unpack (paName assignment)
+                         <> " (confidence: " <> show (paConfidence assignment) <> ")"
+        linkAndUpdateProject (activityId activity) assignment (activitySenderEmail activity)
 
       -- Step 4: Route
       newStatus <- routeActivity activity classification

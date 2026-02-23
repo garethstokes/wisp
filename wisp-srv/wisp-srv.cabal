@@ -36,6 +36,7 @@ executable wisp-srv
         Skills.GitHub
         Skills.Housekeeper
         Skills.Insights
+        Skills.Reflection
         Skills.Registry
         Skills.Research
         Skills.Scheduler
@@ -54,6 +55,7 @@ executable wisp-srv
         Domain.Id
         Domain.Person
         Domain.ProjectClassification
+        Domain.ProjectSuggestion
         Domain.Receipt
         Domain.Run
         Domain.Schema
@@ -112,6 +114,7 @@ executable wisp-srv
         Services.Notification
         Services.Summarizer
         Services.NotificationLoop
+        Services.ProjectUpdater
     build-depends:
         base >=4.17 && <5,
         text,
@@ -140,7 +143,8 @@ executable wisp-srv
         process,
         uuid,
         case-insensitive,
-        vector
+        vector,
+        containers
 
 test-suite wisp-srv-test
     import:           warnings
@@ -172,6 +176,8 @@ test-suite wisp-srv-test
         Skills.Base
         Skills.Insights
         Skills.InsightsSpec
+        Skills.Reflection
+        Skills.ReflectionSpec
         Skills.Registry
         Skills.Scheduler
         Skills.SchedulerSpec
@@ -194,6 +200,7 @@ test-suite wisp-srv-test
         Domain.PersonSpec
         Domain.ProjectClassification
         Domain.ProjectClassificationSpec
+        Domain.ProjectSuggestion
         Domain.Receipt
         Domain.ReceiptSpec
         Domain.Run
@@ -287,6 +294,8 @@ test-suite wisp-srv-test
         Services.Notification
         Services.NotificationLoop
         Services.NotificationSpec
+        Services.ProjectUpdater
+        Services.ProjectUpdaterSpec
         Infra.Db.Notification
         TestEnv
     build-tool-depends:
@@ -320,4 +329,5 @@ test-suite wisp-srv-test
         uuid,
         case-insensitive,
         vector,
-        base64-bytestring
+        base64-bytestring,
+        containers

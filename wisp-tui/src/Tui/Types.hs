@@ -56,6 +56,7 @@ module Tui.Types
   , agsSessions
   -- Approvals lenses
   , apsItems
+  , apsSuggestions
   , apsSelected
   , apsExpanded
   -- Time lens
@@ -66,7 +67,7 @@ import Data.Text (Text)
 import Data.Time (UTCTime)
 import Lens.Micro.TH (makeLenses)
 
-import Wisp.Client (ClientConfig, Activity, ActivityMetrics, Document, Skill, AgentInfo, SessionSummary)
+import Wisp.Client (ClientConfig, Activity, ActivityMetrics, Document, Skill, AgentInfo, SessionSummary, ProjectSuggestion)
 import qualified Wisp.Client as WC
 import Wisp.Client.SSE (ChatEvent)
 
@@ -96,7 +97,7 @@ data AppEvent
   | AgentsLoaded [AgentInfo]
   | AgentSessionsLoaded Text [SessionSummary]  -- agent name, sessions
   | ChatSessionLoaded (Maybe (Text, [WC.ChatMessage]))  -- sessionId, messages
-  | ApprovalsLoaded [(Activity, Text, Text)]
+  | ApprovalsLoaded [(Activity, Text, Text)] [ProjectSuggestion]
   | LoadError Text
   | RefreshView View
   | Tick
@@ -180,6 +181,7 @@ makeLenses ''AgentsState
 -- | Approvals view state
 data ApprovalsState = ApprovalsState
   { _apsItems :: [(Activity, Text, Text)]  -- (activity, type, reason)
+  , _apsSuggestions :: [ProjectSuggestion]  -- new project suggestions
   , _apsSelected :: Int
   , _apsExpanded :: Maybe Int
   } deriving (Show)
