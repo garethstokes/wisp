@@ -69,3 +69,26 @@ spec = describe "Document" $ do
 
     it "deserializes 'agent' to LogAgent" $ do
       decode "\"agent\"" `shouldBe` Just LogAgent
+
+  describe "ExtendedProjectData" $ do
+    it "deserializes full project with accumulated state" $ do
+      let json = "{\"name\":\"Wisp\",\"type\":\"work\",\"summary\":\"Building an AI assistant\",\"status\":\"active\",\"participants\":[\"alice@example.com\"],\"activity_count\":5,\"last_activity_at\":\"2026-02-20T14:30:00Z\"}"
+          Just proj = decode json :: Maybe ExtendedProjectData
+      extProjectName proj `shouldBe` "Wisp"
+      extProjectStatus proj `shouldBe` "active"
+      extProjectActivityCount proj `shouldBe` 5
+      length (extProjectParticipants proj) `shouldBe` 1
+
+    it "serializes with all fields" $ do
+      let proj = ExtendedProjectData
+            { extProjectName = "Wisp"
+            , extProjectType = Work
+            , extProjectSummary = "AI assistant"
+            , extProjectStatus = "active"
+            , extProjectParticipants = ["alice@example.com"]
+            , extProjectActivityCount = 10
+            , extProjectLastActivityAt = Nothing
+            }
+          json = LBS.unpack (encode proj)
+      json `shouldContain` "\"activity_count\":10"
+      json `shouldContain` "\"status\":\"active\""

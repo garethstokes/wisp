@@ -5,6 +5,7 @@ module Domain.Document
   , DocumentType(..)
   , ProjectType(..)
   , ProjectData(..)
+  , ExtendedProjectData(..)
   , NoteData(..)
   , PreferenceData(..)
   , DocumentLogEntry(..)
@@ -12,7 +13,7 @@ module Domain.Document
   , LogSource(..)
   ) where
 
-import Data.Aeson (ToJSON(..), FromJSON(..), Value, object, withObject, withText, (.:), (.:?), (.=))
+import Data.Aeson (ToJSON(..), FromJSON(..), Value, object, withObject, withText, (.:), (.:?), (.=), (.!=))
 import Data.Text (Text)
 import Data.Time (UTCTime)
 import Domain.Id (EntityId(..), unEntityId)
@@ -67,6 +68,38 @@ instance ToJSON ProjectData where
 instance FromJSON ProjectData where
   parseJSON = withObject "ProjectData" $ \v ->
     ProjectData <$> v .: "name" <*> v .: "type"
+
+-- Extended project data with accumulated state
+data ExtendedProjectData = ExtendedProjectData
+  { extProjectName :: Text
+  , extProjectType :: ProjectType
+  , extProjectSummary :: Text
+  , extProjectStatus :: Text  -- "active", "stalled", "completed"
+  , extProjectParticipants :: [Text]
+  , extProjectActivityCount :: Int
+  , extProjectLastActivityAt :: Maybe UTCTime
+  } deriving (Eq, Show, Generic)
+
+instance ToJSON ExtendedProjectData where
+  toJSON p = object
+    [ "name" .= extProjectName p
+    , "type" .= extProjectType p
+    , "summary" .= extProjectSummary p
+    , "status" .= extProjectStatus p
+    , "participants" .= extProjectParticipants p
+    , "activity_count" .= extProjectActivityCount p
+    , "last_activity_at" .= extProjectLastActivityAt p
+    ]
+
+instance FromJSON ExtendedProjectData where
+  parseJSON = withObject "ExtendedProjectData" $ \v -> ExtendedProjectData
+    <$> v .: "name"
+    <*> v .: "type"
+    <*> v .:? "summary" .!= ""
+    <*> v .:? "status" .!= "active"
+    <*> v .:? "participants" .!= []
+    <*> v .:? "activity_count" .!= 0
+    <*> v .:? "last_activity_at"
 
 data NoteData = NoteData
   { noteTitle :: Text
