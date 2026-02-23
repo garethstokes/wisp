@@ -50,6 +50,7 @@ executable wisp-srv
         Domain.ChatEvent
         Domain.Classification
         Domain.Document
+        Domain.ActivityDocument
         Domain.Id
         Domain.Person
         Domain.Receipt
@@ -176,6 +177,8 @@ test-suite wisp-srv-test
         Domain.AccountSpec
         Domain.Activity
         Domain.ActivitySpec
+        Domain.ActivityDocument
+        Domain.ActivityDocumentSpec
         Domain.Agent
         Domain.AgentSpec
         Domain.Chat
