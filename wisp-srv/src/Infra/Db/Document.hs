@@ -9,6 +9,9 @@ module Infra.Db.Document
   , archiveDocument
   , insertDocumentLog
   , getDocumentLog
+  , getProjectByTag
+  , getAllProjects
+  , updateProjectData
   ) where
 
 import Control.Monad.IO.Class (liftIO)
@@ -214,3 +217,39 @@ getDocumentLog docId limit = do
     \ORDER BY created_at DESC \
     \LIMIT ?"
     (unEntityId docId, limit)
+
+-- | Get a project document by its tag (for classifier lookup)
+getProjectByTag :: Text -> App (Maybe Document)
+getProjectByTag tag = do
+  conn <- getConn
+  results <- liftIO $ query conn
+    "SELECT id, tenant_id, type, data, tags, confidence, source, active, \
+    \created_at, archived_at, supersedes_id, last_activity_at \
+    \FROM documents \
+    \WHERE type = 'project' AND active = TRUE AND ? = ANY(tags) \
+    \LIMIT 1"
+    (Only tag)
+  pure $ case results of
+    [doc] -> Just doc
+    _ -> Nothing
+
+-- | Get all active projects
+getAllProjects :: App [Document]
+getAllProjects = do
+  conn <- getConn
+  liftIO $ query_ conn
+    "SELECT id, tenant_id, type, data, tags, confidence, source, active, \
+    \created_at, archived_at, supersedes_id, last_activity_at \
+    \FROM documents \
+    \WHERE type = 'project' AND active = TRUE \
+    \ORDER BY last_activity_at DESC NULLS LAST, created_at DESC"
+
+-- | Update project document data (for accumulated state)
+updateProjectData :: EntityId -> Value -> App ()
+updateProjectData docId newData = do
+  conn <- getConn
+  let dataJson = LBS.toStrict $ encode newData
+  _ <- liftIO $ execute conn
+    "UPDATE documents SET data = ?::jsonb, last_activity_at = now() WHERE id = ?"
+    (dataJson, unEntityId docId)
+  pure ()
