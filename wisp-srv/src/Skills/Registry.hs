@@ -27,6 +27,8 @@ import App.Monad (App)
 import qualified Skills.Concierge as Concierge
 import qualified Skills.Scheduler as Scheduler
 import qualified Skills.Insights as Insights
+import qualified Skills.GitHub as GitHub
+import qualified Skills.Research as Research
 
 -- | Context that a skill can provide to the agent
 data SkillContext = SkillContext
@@ -55,13 +57,15 @@ data Skill = Skill
 
 -- | Registry of available skill names
 allSkillNames :: [Text]
-allSkillNames = ["concierge", "scheduler", "insights"]
+allSkillNames = ["concierge", "scheduler", "insights", "github", "research"]
 
 -- | Look up a skill by name
 getSkill :: Text -> Maybe Skill
 getSkill "concierge" = Just conciergeSkill
 getSkill "scheduler" = Just schedulerSkill
 getSkill "insights"  = Just insightsSkill
+getSkill "github"    = Just githubSkill
+getSkill "research"  = Just researchSkill
 getSkill _           = Nothing
 
 -- Skill definitions
@@ -102,13 +106,42 @@ insightsSkill = Skill
   , skillFetchContext = pure emptySkillContext
   }
 
+githubSkill :: Skill
+githubSkill = Skill
+  { skillName = "github"
+  , skillToolNames = ["list_repos", "list_commits", "read_file", "view_diff", "list_prs", "view_pr"]
+  , skillTools =
+      [ ToolDef "list_repos" "{\"tool\": \"list_repos\", \"limit\": 20}"
+      , ToolDef "list_commits" "{\"tool\": \"list_commits\", \"repo\": \"owner/repo\", \"branch\": \"main\", \"limit\": 10}"
+      , ToolDef "read_file" "{\"tool\": \"read_file\", \"repo\": \"owner/repo\", \"path\": \"src/Main.hs\", \"ref\": \"main\"}"
+      , ToolDef "view_diff" "{\"tool\": \"view_diff\", \"repo\": \"owner/repo\", \"commit\": \"abc123\"}"
+      , ToolDef "list_prs" "{\"tool\": \"list_prs\", \"repo\": \"owner/repo\", \"state\": \"open\"}"
+      , ToolDef "view_pr" "{\"tool\": \"view_pr\", \"repo\": \"owner/repo\", \"number\": 42}"
+      ]
+  , skillFetchContext = pure emptySkillContext
+  }
+
+researchSkill :: Skill
+researchSkill = Skill
+  { skillName = "research"
+  , skillToolNames = ["create_research_plan", "web_search", "write_finding", "complete_research"]
+  , skillTools =
+      [ ToolDef "create_research_plan" "{\"tool\": \"create_research_plan\", \"topic\": \"Research topic\", \"tasks\": [\"Task 1\", \"Task 2\"]}"
+      , ToolDef "web_search" "{\"tool\": \"web_search\", \"query\": \"search query\", \"limit\": 5}"
+      , ToolDef "write_finding" "{\"tool\": \"write_finding\", \"session_id\": \"research-20260223-abc123\", \"title\": \"Finding title\", \"content\": \"Finding content\"}"
+      , ToolDef "complete_research" "{\"tool\": \"complete_research\", \"session_id\": \"research-20260223-abc123\"}"
+      ]
+  , skillFetchContext = pure emptySkillContext
+  }
+
 -- | Base tools available to all agents
 baseTools :: [ToolDef]
 baseTools =
   [ ToolDef "search_knowledge" "{\"tool\": \"search_knowledge\", \"query\": \"search text\"}"
-  , ToolDef "read_note" "{\"tool\": \"read_note\", \"id\": \"note_id\"}"
-  , ToolDef "add_note" "{\"tool\": \"add_note\", \"title\": \"Note title\", \"content\": \"Note content\", \"tags\": [\"tag1\"]}"
+  , ToolDef "read_note" "{\"tool\": \"read_note\", \"note_id\": \"id\"}"
+  , ToolDef "add_note" "{\"tool\": \"add_note\", \"content\": \"Note content\", \"tags\": [\"tag1\"]}"
   , ToolDef "activate_skill" "{\"tool\": \"activate_skill\", \"skill\": \"scheduler\"}"
+  , ToolDef "spawn_agent" "{\"tool\": \"spawn_agent\", \"task\": \"Task description\", \"tools\": [\"web_search\"], \"context\": {}}"
   ]
 
 -- | Result from executing a skill tool
@@ -134,6 +167,8 @@ executeSkillTool skill accountId toolName params mTimezone
   | skillName skill == "concierge" = executeConcierge accountId toolName params
   | skillName skill == "scheduler" = executeScheduler toolName params mTimezone
   | skillName skill == "insights" = executeInsights toolName params mTimezone
+  | skillName skill == "github" = executeGitHub toolName params
+  | skillName skill == "research" = executeResearch accountId toolName params
   | otherwise = pure $ SkillToolError $ "Unknown skill: " <> skillName skill
 
 --------------------------------------------------------------------------------
@@ -293,3 +328,55 @@ parsePeopleInsightsQuery v = case fromJSON v of
 toInsightsResult :: Insights.ToolResult -> App SkillToolResult
 toInsightsResult (Insights.ToolSuccess v) = pure $ SkillToolSuccess v
 toInsightsResult (Insights.ToolError e) = pure $ SkillToolError e
+
+--------------------------------------------------------------------------------
+-- GitHub Tool Execution
+--------------------------------------------------------------------------------
+
+executeGitHub :: Text -> Value -> App SkillToolResult
+executeGitHub toolName params = do
+  case parseGitHubToolCall toolName params of
+    Left err -> pure $ SkillToolError err
+    Right toolCall -> do
+      result <- GitHub.executeToolCall toolCall
+      toGitHubResult result
+
+parseGitHubToolCall :: Text -> Value -> Either Text GitHub.GitHubToolCall
+parseGitHubToolCall toolName params =
+  -- Add the tool name back to params for parsing
+  let paramsWithTool = case params of
+        Object obj -> Object $ KM.insert "tool" (toJSON toolName) obj
+        _ -> params
+  in case fromJSON paramsWithTool of
+    Success call -> Right call
+    Error e -> Left $ "Invalid " <> toolName <> " params: " <> T.pack e
+
+toGitHubResult :: GitHub.ToolResult -> App SkillToolResult
+toGitHubResult (GitHub.ToolSuccess v) = pure $ SkillToolSuccess v
+toGitHubResult (GitHub.ToolError e) = pure $ SkillToolError e
+
+--------------------------------------------------------------------------------
+-- Research Tool Execution
+--------------------------------------------------------------------------------
+
+executeResearch :: EntityId -> Text -> Value -> App SkillToolResult
+executeResearch accountId toolName params = do
+  case parseResearchToolCall toolName params of
+    Left err -> pure $ SkillToolError err
+    Right toolCall -> do
+      result <- Research.executeToolCall accountId toolCall
+      toResearchResult result
+
+parseResearchToolCall :: Text -> Value -> Either Text Research.ResearchToolCall
+parseResearchToolCall toolName params =
+  -- Add the tool name back to params for parsing
+  let paramsWithTool = case params of
+        Object obj -> Object $ KM.insert "tool" (toJSON toolName) obj
+        _ -> params
+  in case fromJSON paramsWithTool of
+    Success call -> Right call
+    Error e -> Left $ "Invalid " <> toolName <> " params: " <> T.pack e
+
+toResearchResult :: Research.ToolResult -> App SkillToolResult
+toResearchResult (Research.ToolSuccess v) = pure $ SkillToolSuccess v
+toResearchResult (Research.ToolError e) = pure $ SkillToolError e

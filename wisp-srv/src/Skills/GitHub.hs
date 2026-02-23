@@ -21,7 +21,7 @@ import Control.Monad.IO.Class (liftIO)
 import Data.Aeson (FromJSON(..), ToJSON(..), Value(..), object, withObject, (.:), (.:?), (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KM
-import Data.ByteString.Base64 (decodeBase64)
+import qualified Data.ByteString.Base64 as B64
 import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
@@ -339,9 +339,7 @@ decodeFileContent val = case val of
     Just (Aeson.String encoded) ->
       -- GitHub returns base64-encoded content with newlines
       let cleaned = T.filter (/= '\n') encoded
-          decoded = case decodeBase64 (encodeUtf8 cleaned) of
-            Right bs -> decodeUtf8 bs
-            Left _ -> encoded  -- Return original if decode fails
+          decoded = decodeUtf8 $ B64.decodeLenient (encodeUtf8 cleaned)
       in Aeson.Object $ KM.insert "content" (Aeson.String decoded) obj
     _ -> val
   _ -> val

@@ -6,19 +6,17 @@ module Services.Tavily
   ) where
 
 import Control.Monad.IO.Class (liftIO)
-import Data.Aeson (FromJSON(..), ToJSON(..), Value(..), object, withObject, (.:), (.:?), (.=))
+import Data.Aeson (FromJSON(..), ToJSON(..), object, withObject, (.:), (.:?), (.=))
 import Data.Text (Text)
 import qualified Data.Text as T
-import Data.Text.Encoding (encodeUtf8)
 import GHC.Generics (Generic)
 import Network.HTTP.Client
 import Network.HTTP.Client.TLS (tlsManagerSettings)
 import Network.HTTP.Types.Status (statusCode)
 import qualified Data.Aeson as Aeson
-import qualified Data.ByteString.Lazy as LBS
 
 import App.Monad (App, getConfig)
-import App.Config (Config(..))
+import App.Config (Config(..), TavilyConfig(..))
 
 -- | A single search result from Tavily
 data TavilySearchResult = TavilySearchResult
@@ -37,11 +35,12 @@ instance ToJSON TavilySearchResult where
     ]
 
 instance FromJSON TavilySearchResult where
-  parseJSON = withObject "TavilySearchResult" $ \v -> TavilySearchResult
-    <$> v .: "title"
-    <*> v .: "url"
-    <*> v .: "content"
-    <*> v .:? "score" .!= 0.0
+  parseJSON = withObject "TavilySearchResult" $ \v -> do
+    title <- v .: "title"
+    url <- v .: "url"
+    content <- v .: "content"
+    mScore <- v .:? "score"
+    pure $ TavilySearchResult title url content (withDefault mScore 0.0)
 
 -- | Response from Tavily search API
 data TavilyResponse = TavilyResponse
@@ -52,8 +51,10 @@ instance FromJSON TavilyResponse where
   parseJSON = withObject "TavilyResponse" $ \v -> TavilyResponse
     <$> v .: "results"
 
-(.!= ) :: Aeson.Parser (Maybe a) -> a -> Aeson.Parser a
-(.!= ) p def = p >>= maybe (pure def) pure
+-- Helper to provide default value for optional JSON fields
+withDefault :: Maybe a -> a -> a
+withDefault (Just x) _ = x
+withDefault Nothing def = def
 
 -- | Search the web using Tavily API
 -- Returns an error if API key is not configured or request fails
@@ -63,8 +64,7 @@ search query maxResults = do
   case tavily cfg of
     Nothing -> pure $ Left "Tavily API key not configured"
     Just tavilyConfig -> do
-      let apiKey = App.Config.apiKey tavilyConfig
-      liftIO $ searchWithKey apiKey query maxResults
+      liftIO $ searchWithKey tavilyConfig.apiKey query maxResults
 
 -- | Perform search with API key
 searchWithKey :: Text -> Text -> Int -> IO (Either Text [TavilySearchResult])

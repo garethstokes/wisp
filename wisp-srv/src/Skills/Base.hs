@@ -5,6 +5,7 @@ module Skills.Base
   ( baseToolNames
   , baseToolNamesWithSkill
   , BaseToolCall(..)
+  , SpawnAgentParams(..)
   , BaseToolResult(..)
   , parseBaseToolCall
   , executeBaseTool
@@ -12,15 +13,20 @@ module Skills.Base
   , deactivateAgentSkillByTenant
   ) where
 
+import Control.Concurrent.Async (async)
+import Control.Monad.IO.Class (liftIO)
+import Control.Monad.Reader (asks)
 import Data.Aeson (FromJSON(..), ToJSON(..), Result(..), Value(..), encode, decode, fromJSON, object, withObject, (.:), (.:?), (.=))
 import Data.Text (Text)
 import qualified Data.Text as T
-import Domain.Id (EntityId)
+import Domain.Id (EntityId, newEntityId, unEntityId)
 import Domain.Agent (AgentName, AgentConfig(..), agentTag)
 import Domain.Tenant (TenantId)
 import qualified Domain.Activity
-import App.Monad (App)
+import App.Monad (App, Env(..), runApp)
+import App.Config (Config(..), ClaudeConfig(..))
 import Infra.Db.Activity (getActivitiesByTags, getActivitiesByTagsTenant, getActivity, updateActivityRaw, insertNote, searchActivities)
+import Infra.Claude.Client (callClaudeWithSystem)
 import Skills.Registry (allSkillNames)
 
 -- | Tools available to all agents (without an active skill)
@@ -30,6 +36,7 @@ baseToolNames =
   , "read_note"
   , "add_note"
   , "activate_skill"
+  , "spawn_agent"
   ]
 
 -- | Tools available when a skill is active (adds deactivate)
@@ -39,6 +46,7 @@ baseToolNamesWithSkill =
   , "read_note"
   , "add_note"
   , "deactivate_skill"
+  , "spawn_agent"
   ]
 
 -- | Parsed base tool call
@@ -49,7 +57,15 @@ data BaseToolCall
   | AddNote Text [Text]               -- ^ content, tags
   | ActivateSkill Text                -- ^ skill name
   | DeactivateSkill                   -- ^ deactivate current skill
+  | SpawnAgent SpawnAgentParams       -- ^ spawn a sub-agent
   deriving (Show, Eq)
+
+-- | Parameters for spawning a sub-agent
+data SpawnAgentParams = SpawnAgentParams
+  { spawnTask    :: Text           -- ^ What the sub-agent should accomplish
+  , spawnTools   :: Maybe [Text]   -- ^ Restrict to these tools (Nothing = inherit)
+  , spawnContext :: Maybe Value    -- ^ Extra context for sub-agent
+  } deriving (Show, Eq)
 
 -- | Result of executing a base tool
 data BaseToolResult
@@ -74,6 +90,7 @@ parseBaseToolCall "read_note" args = parseReadNote args
 parseBaseToolCall "add_note" args = parseAddNote args
 parseBaseToolCall "activate_skill" args = parseActivateSkill args
 parseBaseToolCall "deactivate_skill" _ = Right DeactivateSkill
+parseBaseToolCall "spawn_agent" args = parseSpawnAgent args
 parseBaseToolCall name _ = Left $ "Unknown base tool: " <> name
 
 -- Internal argument types for parsing
@@ -109,6 +126,12 @@ data ActivateSkillArgs = ActivateSkillArgs { activateSkillName :: Text }
 instance FromJSON ActivateSkillArgs where
   parseJSON = withObject "ActivateSkillArgs" $ \v -> ActivateSkillArgs <$> v .: "skill"
 
+instance FromJSON SpawnAgentParams where
+  parseJSON = withObject "SpawnAgentParams" $ \v -> SpawnAgentParams
+    <$> v .: "task"
+    <*> v .:? "tools"
+    <*> v .:? "context"
+
 parseSearchKnowledge :: Value -> Either Text BaseToolCall
 parseSearchKnowledge v = case fromJSON v of
   Success args ->
@@ -133,6 +156,11 @@ parseActivateSkill :: Value -> Either Text BaseToolCall
 parseActivateSkill v = case fromJSON v of
   Success args -> Right $ ActivateSkill (activateSkillName args)
   Error e -> Left $ "Invalid activate_skill args: " <> toText e
+
+parseSpawnAgent :: Value -> Either Text BaseToolCall
+parseSpawnAgent v = case fromJSON v of
+  Success params -> Right $ SpawnAgent params
+  Error e -> Left $ "Invalid spawn_agent args: " <> toText e
 
 toText :: String -> Text
 toText = T.pack
@@ -178,6 +206,55 @@ executeBaseTool accountId tool = case tool of
     pure $ PermissionRequest
       "deactivate_skill"
       "Deactivate current skill?"
+
+  SpawnAgent params -> do
+    -- Generate a unique agent ID
+    agentIdRaw <- liftIO newEntityId
+    let agentId = "subagent-" <> T.take 8 (unEntityId agentIdRaw)
+
+    -- Get environment for async execution
+    env <- asks id
+
+    -- Build sub-agent system prompt
+    let contextJson = case spawnContext params of
+          Just ctx -> "\n\nContext: " <> T.pack (show ctx)
+          Nothing -> ""
+        toolsInfo = case spawnTools params of
+          Just tools -> "\n\nAvailable tools: " <> T.intercalate ", " tools
+          Nothing -> ""
+        systemPrompt = T.unlines
+          [ "You are a sub-agent with a specific task to complete."
+          , ""
+          , "## Your Task"
+          , spawnTask params
+          , contextJson
+          , toolsInfo
+          , ""
+          , "## Instructions"
+          , "Complete the task using available tools. Write your results using add_note or write_finding."
+          , "Be thorough but concise. Focus only on your assigned task."
+          ]
+
+    -- Spawn async - fire and forget
+    _ <- liftIO $ async $ runApp env $ do
+      claudeCfg <- asks (claude . config)
+      result <- liftIO $ callClaudeWithSystem
+        (apiKey claudeCfg)
+        (model claudeCfg)
+        systemPrompt
+        ("Please complete the following task: " <> spawnTask params)
+      -- Sub-agent result is logged but not returned
+      -- Results are written through tools (add_note, write_finding, etc.)
+      case result of
+        Left _err -> pure ()  -- Sub-agent failed silently
+        Right (_response, _, _) -> pure ()  -- Sub-agent completed
+
+    pure $ ToolSuccess $ object
+      [ "agent_id" .= agentId
+      , "task" .= spawnTask params
+      , "status" .= ("spawned" :: Text)
+      , "note" .= ("Sub-agent is running asynchronously. Results will be written via tools." :: Text)
+      ]
 
 -- | Activate a skill for an agent (tenant-scoped)
 -- Updates the agent's note in knowledge to set active_skill

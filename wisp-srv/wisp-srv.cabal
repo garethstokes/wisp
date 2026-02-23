@@ -33,10 +33,13 @@ executable wisp-srv
         Skills.Base
         Skills.Concierge
         Skills.Concierge.Classifier
+        Skills.GitHub
         Skills.Housekeeper
         Skills.Insights
         Skills.Registry
+        Skills.Research
         Skills.Scheduler
+        Services.Tavily
         App.Config
         App.Monad
         App.Env
@@ -110,6 +113,7 @@ executable wisp-srv
         base >=4.17 && <5,
         text,
         bytestring,
+        base64-bytestring,
         aeson,
         yaml,
         time,
@@ -306,4 +310,5 @@ test-suite wisp-srv-test
         process,
         uuid,
         case-insensitive,
-        vector
+        vector,
+        base64-bytestring

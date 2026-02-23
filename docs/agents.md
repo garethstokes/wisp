@@ -43,11 +43,31 @@ All agents have access to these tools without needing a skill:
 
 | Tool | Description |
 |------|-------------|
-| `search_knowledge` | Search notes and documents by tags |
+| `search_knowledge` | Search notes and documents by query or tags |
 | `read_note` | Read full content of a specific note |
 | `add_note` | Create a new note with optional tags |
 | `activate_skill` | Activate a skill to gain its tools |
 | `deactivate_skill` | Deactivate the current skill (when one is active) |
+| `spawn_agent` | Spawn a background sub-agent for a specific task |
+
+### spawn_agent
+
+The `spawn_agent` tool allows an agent to delegate work to a background sub-agent. This is useful for:
+- Long-running research tasks
+- Parallel execution of independent subtasks
+- Work that shouldn't block the main conversation
+
+**Example:**
+```json
+{
+  "tool": "spawn_agent",
+  "task": "Research the latest Haskell web frameworks",
+  "tools": ["research"],
+  "context": {"focus": "production readiness"}
+}
+```
+
+The spawned agent runs asynchronously and stores its findings in the knowledge system with appropriate tags.
 
 ## Skills
 
@@ -106,6 +126,54 @@ Activity search, pattern analysis, and people frequency insights.
 {"tool": "get_summary", "hours": 24}
 {"tool": "get_people_insights", "search": "bob", "important_only": true}
 ```
+
+### github
+
+Read-only access to GitHub repositories using connected OAuth accounts.
+
+**Tools:**
+| Tool | Description |
+|------|-------------|
+| `list_repos` | List repositories the user has access to |
+| `list_commits` | Get commit history for a repository |
+| `read_file` | Read file contents from a repository |
+| `view_diff` | View commit diff or compare two refs |
+| `list_prs` | List pull requests for a repository |
+| `view_pr` | View detailed pull request information |
+
+**Example:**
+```json
+{"tool": "list_repos", "limit": 10}
+{"tool": "list_commits", "repo": "owner/repo", "branch": "main", "limit": 5}
+{"tool": "read_file", "repo": "owner/repo", "path": "src/main.hs", "ref": "main"}
+{"tool": "view_diff", "repo": "owner/repo", "commit": "abc123"}
+{"tool": "list_prs", "repo": "owner/repo", "state": "open"}
+{"tool": "view_pr", "repo": "owner/repo", "number": 42}
+```
+
+**Requires:** Connected GitHub OAuth account.
+
+### research
+
+Deep research with web search, planning, and finding synthesis.
+
+**Tools:**
+| Tool | Description |
+|------|-------------|
+| `create_research_plan` | Create a structured research plan |
+| `web_search` | Search the web for information |
+| `write_finding` | Record a research finding |
+| `complete_research` | Finalize research and summarize findings |
+
+**Example:**
+```json
+{"tool": "create_research_plan", "topic": "Haskell web frameworks", "questions": ["What are the options?", "Which is best for production?"]}
+{"tool": "web_search", "query": "servant vs yesod comparison 2025", "max_results": 5}
+{"tool": "write_finding", "session_id": "research-abc123", "finding": "Servant is the most popular choice for APIs"}
+{"tool": "complete_research", "session_id": "research-abc123", "summary": "Research findings..."}
+```
+
+**Requires:** Tavily API key configured (TAVILY_API_KEY environment variable).
 
 ## Default Agent
 
@@ -178,6 +246,9 @@ The `active_skill` field stores the currently active skill. It starts as `null` 
 | `Skills/Concierge.hs` | Concierge skill implementation |
 | `Skills/Scheduler.hs` | Scheduler skill implementation |
 | `Skills/Insights.hs` | Insights skill implementation |
+| `Skills/GitHub.hs` | GitHub skill implementation |
+| `Skills/Research.hs` | Research skill implementation |
+| `Services/Tavily.hs` | Tavily web search API client |
 
 ### API Endpoints
 

@@ -34,6 +34,8 @@ testConfig = Config
       { apiKey = "test-api-key"
       , model = "claude-3-5-haiku-latest"
       }
+  , github = Nothing
+  , tavily = Nothing
   , notifications = Nothing
   }
 
