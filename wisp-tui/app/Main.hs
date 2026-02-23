@@ -321,14 +321,26 @@ handleChatEnter chan = do
 
 -- | Handle SSE events from chat streaming
 handleSSEEvent :: ChatEvent -> EventM Name AppState ()
+handleSSEEvent AgentRunning = do
+  now <- liftIO getCurrentTime
+  modify $ chatState . csStreaming .~ True
+  modify $ chatState . csToolCalls .~ []
+  modify $ statusMessage .~ Just ("Agent thinking...", now, StatusInfo)
 handleSSEEvent (ChunkEvent chunk) = do
   modify $ chatState . csStreamBuffer %~ (<> chunk)
 handleSSEEvent (ToolCallStart name) = do
   now <- liftIO getCurrentTime
+  modify $ chatState . csToolCalls %~ (++ [(name, Nothing)])
   modify $ statusMessage .~ Just ("Calling " <> name <> "...", now, StatusInfo)
 handleSSEEvent (ToolCallResult name ms) = do
   now <- liftIO getCurrentTime
+  modify $ chatState . csToolCalls %~ updateLastTool name ms
   modify $ statusMessage .~ Just (name <> " completed in " <> T.pack (show ms) <> "ms", now, StatusInfo)
+  where
+    updateLastTool toolName duration calls =
+      reverse $ case reverse calls of
+        ((n, Nothing):rest) | n == toolName -> (n, Just duration) : rest
+        other -> other
 handleSSEEvent (DoneEvent _ _) = do
   s <- get
   now <- liftIO getCurrentTime
@@ -340,8 +352,10 @@ handleSSEEvent (DoneEvent _ _) = do
       modify $ chatState . csMessages %~ (++ [assistantMsg])
   modify $ chatState . csStreamBuffer .~ ""
   modify $ chatState . csStreaming .~ False
+  modify $ chatState . csToolCalls .~ []
 handleSSEEvent (ErrorEvent msg _) = do
   now <- liftIO getCurrentTime
   modify $ statusMessage .~ Just (msg, now, StatusError)
   modify $ chatState . csStreamBuffer .~ ""
   modify $ chatState . csStreaming .~ False
+  modify $ chatState . csToolCalls .~ []
