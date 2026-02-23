@@ -53,6 +53,7 @@ executable wisp-srv
         Domain.ActivityDocument
         Domain.Id
         Domain.Person
+        Domain.ProjectClassification
         Domain.Receipt
         Domain.Run
         Domain.Schema
@@ -190,6 +191,8 @@ test-suite wisp-srv-test
         Domain.IdSpec
         Domain.Person
         Domain.PersonSpec
+        Domain.ProjectClassification
+        Domain.ProjectClassificationSpec
         Domain.Receipt
         Domain.ReceiptSpec
         Domain.Run
