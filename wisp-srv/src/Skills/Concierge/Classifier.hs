@@ -71,6 +71,19 @@ activitySourceText Note = "note"
 activitySourceText GitHubEvent = "github_event"
 activitySourceText UnknownSource = "unknown"
 
+-- | Maximum size for raw data in prompt (in characters)
+-- Roughly 50k chars = ~12k tokens, leaving room for the rest of the prompt
+maxRawDataSize :: Int
+maxRawDataSize = 50000
+
+-- | Truncate raw JSON data to fit within token limits
+truncateRawData :: Value -> Text
+truncateRawData raw =
+  let encoded = TL.toStrict $ TLE.decodeUtf8 $ encode raw
+  in if T.length encoded > maxRawDataSize
+     then T.take maxRawDataSize encoded <> "\n... [truncated, " <> T.pack (show $ T.length encoded) <> " chars total]"
+     else encoded
+
 -- Build the classification prompt
 buildClassificationPrompt :: Text -> Maybe Text -> Value -> Text
 buildClassificationPrompt source mTitle raw = T.unlines
@@ -81,7 +94,7 @@ buildClassificationPrompt source mTitle raw = T.unlines
   , "Title: " <> maybe "(none)" id mTitle
   , ""
   , "Raw data:"
-  , TL.toStrict $ TLE.decodeUtf8 $ encode raw
+  , truncateRawData raw
   , ""
   , "Respond with this exact JSON structure:"
   , "{"
@@ -117,7 +130,7 @@ buildClassificationPromptWithProjects source mTitle raw projects = T.unlines $
   , "Title: " <> maybe "(none)" id mTitle
   , ""
   , "Raw data:"
-  , TL.toStrict $ TLE.decodeUtf8 $ encode raw
+  , truncateRawData raw
   , ""
   ] ++ projectsSection projects ++
   [ "Respond with this exact JSON structure:"
