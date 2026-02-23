@@ -85,6 +85,9 @@ dispatchChatNormal tenantId accountId agentName msgs mTimezone _mSessionIdFromCl
   case mAgent of
     Nothing -> pure $ Left $ "Unknown agent: " <> agentName
     Just agent -> do
+      -- Emit agent running event
+      liftIO $ emit AgentRunningEvent
+
       -- Get or create session (15 minute threshold)
       (session, _isNew) <- SessionDb.getOrCreateActiveSession agentName (15 * 60)
       let sid = sessionId session
