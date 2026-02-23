@@ -35,6 +35,7 @@ instance ToJSON ChatRequest where
 -- | Events received from SSE stream
 data ChatEvent
   = ChunkEvent Text
+  | AgentRunning              -- signals agent started processing
   | ToolCallStart Text  -- tool name
   | ToolCallResult Text Int  -- tool name, duration_ms
   | DoneEvent Text Int  -- session_id, token_count
@@ -132,6 +133,7 @@ parseSSEEvent bs =
     parseEventData :: Text -> Text -> Maybe ChatEvent
     parseEventData event dataJson = case event of
       "chunk" -> parseChunk dataJson
+      "agent_running" -> Just AgentRunning
       "tool_call_start" -> parseToolStart dataJson
       "tool_call_result" -> parseToolResult dataJson
       "done" -> parseDone dataJson
