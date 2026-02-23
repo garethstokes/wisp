@@ -10,14 +10,29 @@ module Skills.GitHub
   , ListPRsQuery(..)
   , ViewPRQuery(..)
   , ToolResult(..)
+    -- Execution
+  , executeToolCall
+  , getGitHubToken
     -- Agent metadata
   , agentInfo
   ) where
 
+import Control.Monad.IO.Class (liftIO)
 import Data.Aeson (FromJSON(..), ToJSON(..), Value(..), object, withObject, (.:), (.:?), (.=))
+import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.KeyMap as KM
+import Data.ByteString.Base64 (decodeBase64)
+import Data.Maybe (fromMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Text.Encoding (encodeUtf8, decodeUtf8)
+import Network.HTTP.Client
+import Network.HTTP.Client.TLS (tlsManagerSettings)
+import Network.HTTP.Types.Status (statusCode)
 import Domain.Agent (AgentInfo(..), ToolInfo(..), ToolType(..))
+import Domain.Account (Account(..), AccountProvider(..))
+import App.Monad (App)
+import Infra.Db.Account (getAccountsByProvider)
 
 --------------------------------------------------------------------------------
 -- Tool Call Types
@@ -210,6 +225,126 @@ instance ToJSON ViewPRQuery where
     [ "repo" .= prRepo
     , "number" .= prNumber
     ]
+
+--------------------------------------------------------------------------------
+-- GitHub API Client
+--------------------------------------------------------------------------------
+
+-- | Get access token from the first connected GitHub account
+getGitHubToken :: App (Maybe Text)
+getGitHubToken = do
+  accounts <- getAccountsByProvider GitHub
+  pure $ case accounts of
+    [] -> Nothing
+    (acc:_) -> extractAccessToken acc
+
+extractAccessToken :: Account -> Maybe Text
+extractAccessToken acc = case accountDetails acc of
+  Aeson.Object obj -> case KM.lookup "access_token" obj of
+    Just (Aeson.String t) -> Just t
+    _ -> Nothing
+  _ -> Nothing
+
+-- | Make an authenticated request to GitHub API
+githubRequest :: Text -> Text -> IO (Either Text Value)
+githubRequest token endpoint = do
+  manager <- newManager tlsManagerSettings
+  let url = "https://api.github.com" <> T.unpack endpoint
+  initReq <- parseRequest url
+  let req = initReq
+        { requestHeaders =
+            [ ("Authorization", "Bearer " <> encodeUtf8 token)
+            , ("User-Agent", "wisp-srv")
+            , ("Accept", "application/vnd.github+json")
+            , ("X-GitHub-Api-Version", "2022-11-28")
+            ]
+        }
+  response <- httpLbs req manager
+  let status = statusCode (responseStatus response)
+  case status of
+    200 -> case Aeson.decode (responseBody response) of
+      Just val -> pure $ Right val
+      Nothing -> pure $ Left "Failed to parse GitHub response"
+    404 -> pure $ Left "Not found"
+    401 -> pure $ Left "GitHub authentication failed"
+    403 -> pure $ Left "GitHub rate limit exceeded or forbidden"
+    _ -> pure $ Left $ "GitHub API error: " <> T.pack (show status)
+
+--------------------------------------------------------------------------------
+-- Tool Execution
+--------------------------------------------------------------------------------
+
+-- | Execute a GitHub tool call
+executeToolCall :: GitHubToolCall -> App ToolResult
+executeToolCall call = do
+  mToken <- getGitHubToken
+  case mToken of
+    Nothing -> pure $ ToolError "No GitHub account connected"
+    Just token -> liftIO $ executeWithToken token call
+
+executeWithToken :: Text -> GitHubToolCall -> IO ToolResult
+executeWithToken token call = case call of
+  ListRepos q -> do
+    let limit = fromMaybe 20 (reposLimit q)
+    result <- githubRequest token $ "/user/repos?per_page=" <> T.pack (show limit) <> "&sort=updated"
+    pure $ toToolResult result
+
+  ListCommits q -> do
+    let limit = fromMaybe 10 (commitsLimit q)
+        branchParam = maybe "" (\b -> "&sha=" <> b) (commitsBranch q)
+        pathParam = maybe "" (\p -> "&path=" <> p) (commitsPath q)
+    result <- githubRequest token $
+      "/repos/" <> commitsRepo q <> "/commits?per_page=" <> T.pack (show limit) <> branchParam <> pathParam
+    pure $ toToolResult result
+
+  ReadFile q -> do
+    let refParam = maybe "" (\r -> "?ref=" <> r) (readFileRef q)
+    result <- githubRequest token $
+      "/repos/" <> readFileRepo q <> "/contents/" <> readFilePath q <> refParam
+    case result of
+      Left err -> pure $ ToolError err
+      Right val -> pure $ ToolSuccess $ decodeFileContent val
+
+  ViewDiff q -> case (diffCommit q, diffBase q, diffHead q) of
+    (Just sha, _, _) -> do
+      -- View single commit diff
+      result <- githubRequest token $ "/repos/" <> diffRepo q <> "/commits/" <> sha
+      pure $ toToolResult result
+    (_, Just base, Just headRef) -> do
+      -- Compare two refs
+      result <- githubRequest token $ "/repos/" <> diffRepo q <> "/compare/" <> base <> "..." <> headRef
+      pure $ toToolResult result
+    _ -> pure $ ToolError "view_diff requires either 'commit' or both 'base' and 'head'"
+
+  ListPRs q -> do
+    let limit = fromMaybe 10 (prsLimit q)
+        state = fromMaybe "open" (prsState q)
+    result <- githubRequest token $
+      "/repos/" <> prsRepo q <> "/pulls?state=" <> state <> "&per_page=" <> T.pack (show limit)
+    pure $ toToolResult result
+
+  ViewPR q -> do
+    result <- githubRequest token $
+      "/repos/" <> prRepo q <> "/pulls/" <> T.pack (show (prNumber q))
+    pure $ toToolResult result
+
+toToolResult :: Either Text Value -> ToolResult
+toToolResult (Left err) = ToolError err
+toToolResult (Right val) = ToolSuccess val
+
+-- | Decode base64 file content from GitHub API response
+decodeFileContent :: Value -> Value
+decodeFileContent val = case val of
+  Aeson.Object obj -> case KM.lookup "content" obj of
+    Just (Aeson.String encoded) ->
+      -- GitHub returns base64-encoded content with newlines
+      let cleaned = T.filter (/= '\n') encoded
+          decoded = case decodeBase64 (encodeUtf8 cleaned) of
+            Right bs -> decodeUtf8 bs
+            Left _ -> encoded  -- Return original if decode fails
+      in Aeson.Object $ KM.insert "content" (Aeson.String decoded) obj
+    _ -> val
+  _ -> val
 
 --------------------------------------------------------------------------------
 -- Agent Metadata
