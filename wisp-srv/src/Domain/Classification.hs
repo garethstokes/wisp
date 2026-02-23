@@ -4,7 +4,8 @@ module Domain.Classification
   , Urgency(..)
   ) where
 
-import Data.Aeson (FromJSON(..), ToJSON(..), withText, withObject, (.:), (.:?), object, (.=))
+import Data.Aeson (FromJSON(..), ToJSON(..), withText, withObject, (.:), (.:?), (.!=), object, (.=))
+import Domain.ProjectClassification (ProjectAssignment)
 import Data.Text (Text)
 import GHC.Generics (Generic)
 
@@ -57,6 +58,7 @@ data Classification = Classification
   , classificationReasoning :: Text
   , classificationSuggestedActions :: [Text]
   , classificationOptionFraming :: Maybe Text
+  , classificationProjects :: [ProjectAssignment]
   } deriving (Eq, Show, Generic)
 
 instance FromJSON Classification where
@@ -70,6 +72,7 @@ instance FromJSON Classification where
     <*> v .: "reasoning"
     <*> v .: "suggested_actions"
     <*> v .:? "option_framing"
+    <*> v .:? "projects" .!= []
 
 instance ToJSON Classification where
   toJSON c = object
@@ -82,4 +85,5 @@ instance ToJSON Classification where
     , "reasoning" .= classificationReasoning c
     , "suggested_actions" .= classificationSuggestedActions c
     , "option_framing" .= classificationOptionFraming c
+    , "projects" .= classificationProjects c
     ]

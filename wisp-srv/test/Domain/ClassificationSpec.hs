@@ -2,6 +2,7 @@ module Domain.ClassificationSpec where
 
 import Test.Hspec
 import Domain.Classification
+import Domain.ProjectClassification (ProjectAssignment(..), paName)
 import Data.Aeson (decode, encode)
 
 spec :: Spec
@@ -40,3 +41,22 @@ spec = describe "Classification" $ do
       (decode "\"high\"" :: Maybe Urgency) `shouldBe` Just High
       (decode "\"normal\"" :: Maybe Urgency) `shouldBe` Just Normal
       (decode "\"low\"" :: Maybe Urgency) `shouldBe` Just Low
+
+  describe "projects field" $ do
+    it "parses classification with projects array" $ do
+      let json = "{\"personas\":[\"work\"],\"activity_type\":\"request\",\
+                 \\"urgency\":\"normal\",\"autonomy_tier\":2,\
+                 \\"confidence\":0.85,\"summary\":\"Meeting request\",\
+                 \\"reasoning\":\"Work email\",\"suggested_actions\":[],\
+                 \\"projects\":[{\"name\":\"wisp\",\"confidence\":0.9}]}"
+          Just c = decode json :: Maybe Classification
+      length (classificationProjects c) `shouldBe` 1
+      paName (head (classificationProjects c)) `shouldBe` "wisp"
+
+    it "defaults to empty projects if not present" $ do
+      let json = "{\"personas\":[\"work\"],\"activity_type\":\"request\",\
+                 \\"urgency\":\"normal\",\"autonomy_tier\":2,\
+                 \\"confidence\":0.85,\"summary\":\"Meeting request\",\
+                 \\"reasoning\":\"Work email\",\"suggested_actions\":[]}"
+          Just c = decode json :: Maybe Classification
+      classificationProjects c `shouldBe` []
