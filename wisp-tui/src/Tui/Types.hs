@@ -30,6 +30,7 @@ module Tui.Types
   , csCurrentSession
   , csStreaming
   , csStreamBuffer
+  , csToolCalls
   -- Activities lenses
   , asActivities
   , asSelected
@@ -128,6 +129,7 @@ data ChatState = ChatState
   , _csCurrentSession :: Text
   , _csStreaming :: Bool
   , _csStreamBuffer :: Text
+  , _csToolCalls :: [(Text, Maybe Int)]  -- (name, duration_ms or Nothing if pending)
   } deriving (Show)
 
 makeLenses ''ChatState
