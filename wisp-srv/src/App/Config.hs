@@ -4,6 +4,7 @@ module App.Config
   , DatabaseConfig(..)
   , GoogleConfig(..)
   , GitHubConfig(..)
+  , TavilyConfig(..)
   , PollingConfig(..)
   , ClassificationConfig(..)
   , ClaudeConfig(..)
@@ -50,6 +51,15 @@ instance FromJSON GitHubConfig
 
 instance Show GitHubConfig where
   show c = "GitHubConfig {clientId = " <> show (c.clientId) <> ", clientSecret = \"<redacted>\"}"
+
+data TavilyConfig = TavilyConfig
+  { apiKey :: Text
+  } deriving (Generic)
+
+instance FromJSON TavilyConfig
+
+instance Show TavilyConfig where
+  show _ = "TavilyConfig {apiKey = \"<redacted>\"}"
 
 data PollingConfig = PollingConfig
   { intervalMinutes :: Int
@@ -99,6 +109,7 @@ data Config = Config
   , database :: DatabaseConfig
   , google :: GoogleConfig
   , github :: Maybe GitHubConfig
+  , tavily :: Maybe TavilyConfig
   , polling :: PollingConfig
   , classification :: ClassificationConfig
   , claude :: ClaudeConfig
@@ -120,10 +131,15 @@ loadConfig path = do
       mGitHubClientId <- lookupEnv "GITHUB_CLIENT_ID"
       mGitHubClientSecret <- lookupEnv "GITHUB_CLIENT_SECRET"
       mAnthropicApiKey <- lookupEnv "ANTHROPIC_API_KEY"
+      mTavilyApiKey <- lookupEnv "TAVILY_API_KEY"
 
       let githubConfig = case (mGitHubClientId, mGitHubClientSecret) of
             (Just cid, Just cs) -> Just $ GitHubConfig (T.pack cid) (T.pack cs)
             _ -> cfg.github
+
+      let tavilyConfig = case mTavilyApiKey of
+            Just key -> Just $ TavilyConfig (T.pack key)
+            Nothing -> cfg.tavily
 
       pure cfg
         { database = cfg.database
@@ -137,6 +153,7 @@ loadConfig path = do
             , clientSecret = maybe cfg.google.clientSecret T.pack mGoogleClientSecret
             }
         , github = githubConfig
+        , tavily = tavilyConfig
         , claude = cfg.claude
             { apiKey = maybe cfg.claude.apiKey T.pack mAnthropicApiKey
             }

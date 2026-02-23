@@ -20,7 +20,7 @@ import Domain.Agent (AgentName, AgentConfig(..), agentTag)
 import Domain.Tenant (TenantId)
 import qualified Domain.Activity
 import App.Monad (App)
-import Infra.Db.Activity (getActivitiesByTags, getActivitiesByTagsTenant, getActivity, updateActivityRaw, insertNote)
+import Infra.Db.Activity (getActivitiesByTags, getActivitiesByTagsTenant, getActivity, updateActivityRaw, insertNote, searchActivities)
 import Skills.Registry (allSkillNames)
 
 -- | Tools available to all agents (without an active skill)
@@ -43,11 +43,12 @@ baseToolNamesWithSkill =
 
 -- | Parsed base tool call
 data BaseToolCall
-  = SearchKnowledge [Text] Int    -- ^ tags, limit
-  | ReadNote EntityId             -- ^ note ID
-  | AddNote Text [Text]           -- ^ content, tags
-  | ActivateSkill Text            -- ^ skill name
-  | DeactivateSkill               -- ^ deactivate current skill
+  = SearchKnowledgeByQuery Text Int   -- ^ text query, limit
+  | SearchKnowledgeByTags [Text] Int  -- ^ tags, limit
+  | ReadNote EntityId                 -- ^ note ID
+  | AddNote Text [Text]               -- ^ content, tags
+  | ActivateSkill Text                -- ^ skill name
+  | DeactivateSkill                   -- ^ deactivate current skill
   deriving (Show, Eq)
 
 -- | Result of executing a base tool
@@ -77,13 +78,15 @@ parseBaseToolCall name _ = Left $ "Unknown base tool: " <> name
 
 -- Internal argument types for parsing
 data SearchKnowledgeArgs = SearchKnowledgeArgs
-  { searchTags :: [Text]
+  { searchQuery :: Maybe Text    -- Text search (preferred)
+  , searchTags :: Maybe [Text]   -- Tag filter (legacy)
   , searchLimit :: Maybe Int
   }
 
 instance FromJSON SearchKnowledgeArgs where
   parseJSON = withObject "SearchKnowledgeArgs" $ \v -> SearchKnowledgeArgs
-    <$> v .: "tags"
+    <$> v .:? "query"
+    <*> v .:? "tags"
     <*> v .:? "limit"
 
 data ReadNoteArgs = ReadNoteArgs { readNoteId :: EntityId }
@@ -108,7 +111,12 @@ instance FromJSON ActivateSkillArgs where
 
 parseSearchKnowledge :: Value -> Either Text BaseToolCall
 parseSearchKnowledge v = case fromJSON v of
-  Success args -> Right $ SearchKnowledge (searchTags args) (maybe 20 id (searchLimit args))
+  Success args ->
+    let limit = maybe 20 id (searchLimit args)
+    in case (searchQuery args, searchTags args) of
+      (Just q, _) -> Right $ SearchKnowledgeByQuery q limit
+      (Nothing, Just tags) -> Right $ SearchKnowledgeByTags tags limit
+      (Nothing, Nothing) -> Left "search_knowledge requires 'query' or 'tags' parameter"
   Error e -> Left $ "Invalid search_knowledge args: " <> toText e
 
 parseReadNote :: Value -> Either Text BaseToolCall
@@ -132,8 +140,15 @@ toText = T.pack
 -- | Execute a base tool call
 executeBaseTool :: EntityId -> BaseToolCall -> App BaseToolResult
 executeBaseTool accountId tool = case tool of
-  SearchKnowledge tags limit -> do
-    notes <- getActivitiesByTags accountId tags limit
+  SearchKnowledgeByQuery query limit -> do
+    notes <- searchActivities query limit
+    pure $ ToolSuccess $ toJSON notes
+
+  SearchKnowledgeByTags tags limit -> do
+    -- Note: getActivitiesByTags requires accountId, but searchActivities doesn't
+    -- For tag search, we use searchActivities with tags as query for now
+    -- TODO: Consider making getActivitiesByTags work across all accounts
+    notes <- searchActivities (T.unwords tags) limit
     pure $ ToolSuccess $ toJSON notes
 
   ReadNote noteId -> do
