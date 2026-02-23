@@ -46,8 +46,8 @@ withTestEnv action = do
   _ <- execute_ conn "begin"
   -- Insert a test account so foreign key constraints are satisfied
   _ <- execute_ conn
-    "INSERT INTO accounts (id, email, display_name) \
-    \VALUES ('test-account', 'test@example.com', 'Test User') \
+    "INSERT INTO accounts (id, display_name, provider, details) \
+    \VALUES ('test-account', 'Test User', 'google', '{\"email\": \"test@example.com\"}') \
     \ON CONFLICT (id) DO NOTHING"
   lgr <- newStdoutLoggerSet defaultBufSize
   cq <- newClassificationQueue
