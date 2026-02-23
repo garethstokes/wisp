@@ -15,6 +15,7 @@ import Data.Text (Text)
 import qualified Data.Text as T
 import Lens.Micro ((^.), (%~))
 
+import Tui.Markdown (renderMarkdown)
 import Tui.Types
 import Wisp.Client (ClientConfig, ClientError(..))
 import Wisp.Client.SSE (streamChat, ChatRequest(..), ChatEvent(..))
@@ -43,13 +44,8 @@ messagesWidget cs = viewport ChatHistory Vertical $ vBox $
 renderMessage :: ChatMessage -> Widget Name
 renderMessage msg = padBottom (Pad 1) $ vBox
   [ withAttr (roleAttr $ cmRole msg) $ txt $ "[" <> cmRole msg <> "]"
-  , padLeft (Pad 2) $ renderMultiline (cmContent msg)
+  , padLeft (Pad 2) $ renderMarkdown (cmContent msg)
   ]
-
--- | Render text with proper newline handling
-renderMultiline :: Text -> Widget Name
-renderMultiline content =
-  vBox $ map txtWrap $ T.splitOn "\n" content
 
 roleAttr :: Text -> AttrName
 roleAttr "You" = attrName "userRole"
@@ -59,7 +55,7 @@ streamingIndicator :: ChatState -> [Widget Name]
 streamingIndicator cs
   | cs ^. csStreaming =
       toolCallsWidget (cs ^. csToolCalls)
-      ++ [ padLeft (Pad 2) $ renderMultiline $ cs ^. csStreamBuffer
+      ++ [ padLeft (Pad 2) $ renderMarkdown $ cs ^. csStreamBuffer
          , withAttr (attrName "cursor") $ txt "▌"
          ]
   | otherwise = []
