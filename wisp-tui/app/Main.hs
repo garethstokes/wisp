@@ -82,6 +82,13 @@ app chan = App
   , appAttrMap = const theMap
   }
 
+-- | Enable mouse mode
+enableMouse :: EventM Name AppState ()
+enableMouse = do
+  vty <- getVtyHandle
+  let output = V.outputIface vty
+  liftIO $ V.setMode output V.Mouse True
+
 theMap :: AttrMap
 theMap = attrMap V.defAttr
   [ (attrName "selectedTab", V.withStyle V.defAttr V.bold)
@@ -181,6 +188,7 @@ handleEvent _ (AppEvent (RefreshView _)) = do
 handleEvent _ (AppEvent Tick) = do
   now <- liftIO getCurrentTime
   modify $ currentTime .~ Just now
+  enableMouse  -- idempotent, ensures mouse is enabled
 handleEvent _ (AppEvent (ChatEventReceived evt)) = do
   -- Handle chat streaming events
   handleSSEEvent evt
@@ -206,6 +214,11 @@ handleEvent chan (VtyEvent e) = do
     SkillsView -> handleSkillsEvent e
     AgentsView -> handleAgentsEvent e
     ApprovalsView -> handleApprovalsEvent e
+-- Mouse scroll for chat viewport
+handleEvent _ (MouseDown ChatHistory V.BScrollUp _ _) = do
+  vScrollBy (viewportScroll ChatHistory) (-3)
+handleEvent _ (MouseDown ChatHistory V.BScrollDown _ _) = do
+  vScrollBy (viewportScroll ChatHistory) 3
 handleEvent _ _ = pure ()
 
 -- | Trigger async data load for current view
@@ -319,6 +332,9 @@ handleChatEnter chan = do
       modify $ chatState . csStreaming .~ True
       modify $ chatState . csStreamBuffer .~ ""
 
+      -- Scroll to bottom
+      vScrollToEnd (viewportScroll ChatHistory)
+
       -- Send to server
       let cfg = s ^. clientConfig
           agent = s ^. chatState . csCurrentAgent
@@ -334,6 +350,7 @@ handleSSEEvent AgentRunning = do
   modify $ statusMessage .~ Just ("Agent thinking...", now, StatusInfo)
 handleSSEEvent (ChunkEvent chunk) = do
   modify $ chatState . csStreamBuffer %~ (<> chunk)
+  vScrollToEnd (viewportScroll ChatHistory)
 handleSSEEvent (ToolCallStart name) = do
   now <- liftIO getCurrentTime
   modify $ chatState . csToolCalls %~ (++ [(name, Nothing)])
@@ -360,6 +377,7 @@ handleSSEEvent (DoneEvent _ _) = do
   modify $ chatState . csStreaming .~ False
   modify $ chatState . csToolCalls .~ []
   modify $ statusMessage .~ Nothing
+  vScrollToEnd (viewportScroll ChatHistory)
 handleSSEEvent (ErrorEvent msg _) = do
   now <- liftIO getCurrentTime
   modify $ statusMessage .~ Just (msg, now, StatusError)
