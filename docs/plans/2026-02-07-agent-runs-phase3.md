@@ -303,10 +303,10 @@ The agents don't use RunContext yet, so we'll ignore it in the lambda:
 dispatchChat :: Text -> [ChatMessage] -> Maybe Text -> App (Either Text ChatResponse)
 dispatchChat agent msgs tz = withRunLogging agent Nothing msgs $ \_ctx messages ->
   case agent of
-    "wisp/concierge" -> Concierge.handleChat messages tz
-    "wisp/scheduler" -> Scheduler.handleChat messages tz
+    "wisp" -> Concierge.handleChat messages tz
+    "wisp" -> Scheduler.handleChat messages tz
     "wisp/housekeeper" -> pure $ Left "Agent 'wisp/housekeeper' not yet implemented"
-    "wisp/insights" -> Insights.handleChat messages tz
+    "wisp" -> Insights.handleChat messages tz
     _ -> pure $ Left $ "Unknown agent: " <> agent
 ```
 
@@ -787,10 +787,10 @@ git commit -m "feat(insights): add handleChatWithContext with event logging"
 dispatchChat :: Text -> [ChatMessage] -> Maybe Text -> App (Either Text ChatResponse)
 dispatchChat agent msgs tz = withRunLogging agent Nothing msgs $ \ctx messages ->
   case agent of
-    "wisp/concierge" -> Concierge.handleChatWithContext ctx messages tz
-    "wisp/scheduler" -> Scheduler.handleChatWithContext ctx messages tz
+    "wisp" -> Concierge.handleChatWithContext ctx messages tz
+    "wisp" -> Scheduler.handleChatWithContext ctx messages tz
     "wisp/housekeeper" -> pure $ Left "Agent 'wisp/housekeeper' not yet implemented"
-    "wisp/insights" -> Insights.handleChatWithContext ctx messages tz
+    "wisp" -> Insights.handleChatWithContext ctx messages tz
     _ -> pure $ Left $ "Unknown agent: " <> agent
 ```
 

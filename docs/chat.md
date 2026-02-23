@@ -7,47 +7,50 @@ The chat system provides conversational interaction with Wisp agents.
 Chat requires specifying an agent via `--agent` (or `-a`):
 
 ```bash
-wisp chat -a wisp/concierge -m "Show quarantined items"
-wisp chat -a wisp/concierge -m "Approve them"
+wisp chat -a wisp -m "Hello"
+wisp chat -a wisp -m "What's on my calendar?"
 ```
 
 Available agents can be listed with `wisp agents`.
 
+## Skills
+
+Agents can activate skills to gain specialized tools:
+
+```bash
+# Activate concierge skill for inbox management
+wisp activate wisp concierge
+wisp chat -a wisp -m "Show quarantined items"
+
+# Switch to scheduler skill for calendar tasks
+wisp activate wisp scheduler
+wisp chat -a wisp -m "Find free time tomorrow"
+
+# Deactivate skill (agent keeps base tools only)
+wisp deactivate wisp
+```
+
 ## Session Persistence
 
-Chat sessions are stored locally in `~/.wisp/sessions/<name>.json`.
+Chat sessions are stored in the database per agent.
 
 ### Session Management
 
 ```bash
 # Use default session
-wisp chat -a wisp/concierge -m "Hello"
+wisp chat -a wisp -m "Hello"
 
 # Use named session
-wisp chat -a wisp/concierge -m "Hello" -s work
+wisp chat -a wisp -m "Hello" -s work
 
 # Start fresh session (clears history)
-wisp chat -a wisp/concierge -m "Fresh start" --new
+wisp chat -a wisp -m "Fresh start" --new
 
 # List sessions
 wisp sessions
 
 # Delete a session
 wisp sessions -d work
-```
-
-### Session File Structure
-
-```json
-{
-  "agent": "wisp/concierge",
-  "created_at": "2026-02-04T12:00:00Z",
-  "updated_at": "2026-02-04T12:05:00Z",
-  "messages": [
-    {"role": "user", "content": "Show me quarantined items"},
-    {"role": "assistant", "content": "Here are 3 quarantined items..."}
-  ]
-}
 ```
 
 ### Session Behavior
@@ -64,7 +67,7 @@ wisp sessions -d work
 Request:
 ```json
 {
-  "agent": "wisp/concierge",
+  "agent": "wisp",
   "messages": [
     {"role": "user", "content": "Hello"}
   ]
@@ -80,9 +83,8 @@ Response:
 ```
 
 The server validates:
-1. Agent exists in registry
-2. Agent is implemented
-3. Then dispatches to the agent's handler
+1. Agent exists in knowledge (note tagged `agent:NAME`)
+2. Then dispatches to the agent handler
 
 ### GET /agents
 
@@ -90,57 +92,64 @@ Returns all registered agents:
 
 ```json
 {
-  "agents": [
-    {
-      "id": "wisp/concierge",
-      "description": "Intake, classification, routing, quarantine",
-      "tools": [
-        {"name": "update_activities", "type": "decision"},
-        {"name": "query_activities", "type": "decision"},
-        {"name": "query_people", "type": "decision"}
-      ],
-      "workflows": ["classify-pending", "route-activity", "quarantine-interview"],
-      "implemented": true
-    }
-  ]
+  "agents": ["wisp", "jarvis"],
+  "skills": ["concierge", "scheduler", "insights"]
 }
 ```
 
+### GET /agents/:name
+
+Returns agent details including active skill:
+
+```json
+{
+  "name": "wisp",
+  "personality": "Helpful, concise, and proactive.",
+  "active_skill": "concierge",
+  "soul": {
+    "personality": "Prefers bullet points",
+    "insights": ["User likes morning meetings"]
+  }
+}
+```
+
+### POST /agents/:name/activate/:skill
+
+Activates a skill for an agent.
+
+### POST /agents/:name/deactivate
+
+Deactivates the current skill.
+
 ## Architecture
 
-### Agent Registry
+### Agent Loading
 
-Each agent module exports `agentInfo :: AgentInfo`:
+Agents are loaded from knowledge notes tagged with `agent:NAME`:
 
 ```haskell
-data AgentInfo = AgentInfo
-  { agentId          :: Text
-  , agentDescription :: Text
-  , agentTools       :: [ToolInfo]
-  , agentWorkflows   :: [Text]
-  , agentImplemented :: Bool
+loadAgentByTenant :: TenantId -> AgentName -> App (Maybe Agent)
+```
+
+### Skill Activation
+
+Skills are stored in the agent's config and resolved at runtime:
+
+```haskell
+data Agent = Agent
+  { agentName   :: AgentName
+  , agentConfig :: AgentConfig
+  , agentSoul   :: Soul
+  , agentSkill  :: Maybe Skill  -- Currently active skill
   }
 ```
 
-### Agent Dispatcher
-
-`Agents.Dispatcher` routes chat requests by agent path:
-
-```haskell
-dispatchChat :: Text -> [ChatMessage] -> App (Either Text ChatResponse)
-dispatchChat "wisp/concierge" msgs = Concierge.handleChat msgs
-dispatchChat "wisp/scheduler" _ = pure $ Left "Agent not implemented"
--- etc.
-```
-
-This pattern supports future namespaces like `custom/my-agent`.
-
 ### Handler Signature
 
-Agents implement:
+The dispatcher handles all chat requests:
 
 ```haskell
-handleChat :: [ChatMessage] -> App (Either Text ChatResponse)
+dispatchChat :: TenantId -> EntityId -> AgentName -> [ChatMessage] -> Maybe Text -> App (Either Text ChatResponse)
 ```
 
 The full message history is provided, allowing agents to maintain conversational context.

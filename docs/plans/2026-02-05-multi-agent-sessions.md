@@ -7,7 +7,7 @@
 **Current session structure:**
 ```json
 {
-  "agent": "wisp/concierge",
+  "agent": "wisp",
   "messages": [{"role": "user", "content": "..."}]
 }
 ```
@@ -17,9 +17,9 @@
 {
   "messages": [
     {"role": "user", "content": "hello what's on for today?"},
-    {"role": "assistant", "agent": "wisp/concierge", "content": "You have 3 meetings..."},
+    {"role": "assistant", "agent": "wisp", "content": "You have 3 meetings..."},
     {"role": "user", "content": "can you clear my afternoon?"},
-    {"role": "assistant", "agent": "wisp/scheduler", "content": "I'll help with that..."}
+    {"role": "assistant", "agent": "wisp", "content": "I'll help with that..."}
   ]
 }
 ```
@@ -34,13 +34,13 @@ Key changes:
 The `-a` flag becomes required for `chat` (no default agent):
 
 ```bash
-wisp chat -a wisp/concierge -m "what's on today?"
-wisp chat -a wisp/scheduler -m "clear my afternoon"
+wisp chat -a wisp -m "what's on today?"
+wisp chat -a wisp -m "clear my afternoon"
 ```
 
 If `-a` is omitted, show error:
 ```
-Error: Please specify an agent with -a (e.g., -a wisp/concierge)
+Error: Please specify an agent with -a (e.g., -a wisp)
 ```
 
 Remove the agent-mismatch validation that currently blocks using a different agent on an existing session.
@@ -53,7 +53,7 @@ When an agent receives conversation history, it builds a prompt showing who said
 
 ```
 User: hello what's on for today?
-wisp/concierge: You have 3 meetings today - a standup at 9am...
+wisp: You have 3 meetings today - a standup at 9am...
 User: can you clear my afternoon?
 ```
 

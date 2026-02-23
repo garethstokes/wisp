@@ -26,11 +26,11 @@ spec = describe "Chat" $ do
 
   describe "ChatRequest" $ do
     it "parses request with agent and messages" $ do
-      let json = "{\"agent\":\"wisp/concierge\",\"messages\":[{\"role\":\"user\",\"content\":\"Hi\"}]}"
+      let json = "{\"agent\":\"wisp\",\"messages\":[{\"role\":\"user\",\"content\":\"Hi\"}]}"
       case decode json :: Maybe ChatRequest of
         Nothing -> expectationFailure "Failed to parse"
         Just r -> do
-          chatAgent r `shouldBe` "wisp/concierge"
+          chatAgent r `shouldBe` "wisp"
           length (chatMessages r) `shouldBe` 1
 
   describe "ChatResponse" $ do

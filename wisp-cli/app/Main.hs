@@ -127,7 +127,7 @@ chatOptionsParser :: Parser Command
 chatOptionsParser =
   Chat
     <$> ( ChatOptions
-            <$> strOption (long "agent" <> short 'a' <> metavar "AGENT" <> help "Agent path (e.g., wisp/concierge)")
+            <$> strOption (long "agent" <> short 'a' <> metavar "AGENT" <> help "Agent name (e.g., wisp)")
             <*> optional (strOption (long "message" <> short 'm' <> metavar "MSG" <> help "Message to send"))
             <*> strOption (long "session" <> short 's' <> metavar "NAME" <> value "default" <> help "Session name")
             <*> switch (long "new" <> help "Start fresh session")
@@ -370,7 +370,7 @@ runHelp = do
   TIO.putStrLn "  approve ID          Move quarantined activity to surfaced"
   TIO.putStrLn "  dismiss ID          Archive an activity"
   TIO.putStrLn "  chat                Chat with an agent"
-  TIO.putStrLn "    -a, --agent       Agent path (e.g., wisp/concierge)"
+  TIO.putStrLn "    -a, --agent       Agent name (e.g., wisp)"
   TIO.putStrLn "    -m, --message     Message to send"
   TIO.putStrLn "    -s, --session     Session name (default: \"default\")"
   TIO.putStrLn "    --new             Start fresh session"
@@ -411,7 +411,7 @@ runHelp = do
   TIO.putStrLn "  wisp skills concierge                 Show concierge skill"
   TIO.putStrLn "  wisp activate wisp concierge          Activate concierge for wisp"
   TIO.putStrLn "  wisp deactivate wisp                  Deactivate wisp's skill"
-  TIO.putStrLn "  wisp chat -a wisp/concierge -m \"hi\"   Chat with agent"
+  TIO.putStrLn "  wisp chat -a wisp -m \"hi\"            Chat with agent"
   TIO.putStrLn ""
   TIO.putStrLn "Activity IDs are shown in brackets, e.g. [abc123]"
 

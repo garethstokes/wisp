@@ -17,7 +17,7 @@ wisp-tui is a navigation-centric TUI with four main views accessed via `Tab` cyc
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ [Chat] Activities  Documents  Approvals     wisp/concierge  │  ← Header
+│ [Chat] Activities  Documents  Approvals     wisp  │  ← Header
 ├─────────────────────────────────────────────────────────────┤
 │                                                             │
 │                      Main Content Area                      │  ← View
@@ -66,7 +66,7 @@ POST /api/chat/stream
 Content-Type: application/json
 Accept: text/event-stream
 
-{"agent": "wisp/concierge", "message": "...", "session": "default"}
+{"agent": "wisp", "message": "...", "session": "default"}
 ```
 
 **Event types:**
@@ -93,7 +93,7 @@ Accept: text/event-stream
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ [Chat] Activities  Documents  Approvals     wisp/concierge  │
+│ [Chat] Activities  Documents  Approvals     wisp  │
 ├─────────────────────────────────────────────────────────────┤
 │ ┌─session: default────────────────────────────────────────┐ │
 │ │                                                         │ │

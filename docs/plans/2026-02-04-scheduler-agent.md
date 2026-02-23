@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Implement wisp/scheduler agent for calendar reasoning, schedule queries, and finding available time slots.
+**Goal:** Implement wisp agent for calendar reasoning, schedule queries, and finding available time slots.
 
 **Architecture:** The scheduler agent handles calendar-focused queries via chat. It queries calendar events for date ranges, identifies free slots, and helps users reason about their schedule. Uses the same LLM chat pattern as Concierge but with calendar-specific tools and context.
 
@@ -408,7 +408,7 @@ stripCodeBlock t =
 
 agentInfo :: AgentInfo
 agentInfo = AgentInfo
-  { agentId = "wisp/scheduler"
+  { agentId = "wisp"
   , agentDescription = "Calendar reasoning, schedule queries, finding free time"
   , agentTools =
       [ ToolInfo "query_calendar" Decision
@@ -474,10 +474,10 @@ getAgent aid = case [a | a <- allAgents, agentId a == aid] of
 -- | Dispatch chat to the appropriate agent
 -- timezone: Optional IANA timezone for converting dates to local time in agent context
 dispatchChat :: Text -> [ChatMessage] -> Maybe Text -> App (Either Text ChatResponse)
-dispatchChat "wisp/concierge" msgs tz = Concierge.handleChat msgs tz
-dispatchChat "wisp/scheduler" msgs tz = Scheduler.handleChat msgs tz
+dispatchChat "wisp" msgs tz = Concierge.handleChat msgs tz
+dispatchChat "wisp" msgs tz = Scheduler.handleChat msgs tz
 dispatchChat "wisp/housekeeper" _ _ = pure $ Left "Agent 'wisp/housekeeper' not yet implemented"
-dispatchChat "wisp/insights" _ _ = pure $ Left "Agent 'wisp/insights' not yet implemented"
+dispatchChat "wisp" _ _ = pure $ Left "Agent 'wisp' not yet implemented"
 dispatchChat agent _ _ = pure $ Left $ "Unknown agent: " <> agent
 ```
 
@@ -591,7 +591,7 @@ spec = do
   describe "Scheduler" $ do
     describe "agentInfo" $ do
       it "has correct agent ID" $ do
-        agentId agentInfo `shouldBe` "wisp/scheduler"
+        agentId agentInfo `shouldBe` "wisp"
 
       it "is marked as implemented" $ do
         agentImplemented agentInfo `shouldBe` True
@@ -662,7 +662,7 @@ git commit -m "test: add scheduler agent tests"
 In `docs/agents.md`, replace the scheduler section:
 
 ```markdown
-### wisp/scheduler [IMPLEMENTED]
+### wisp [IMPLEMENTED]
 
 Calendar reasoning, schedule queries, finding free time.
 
@@ -765,8 +765,8 @@ Start server and test via CLI:
 cabal run wisp-srv
 
 # In another terminal
-wisp chat -a wisp/scheduler -m "What's on my calendar this week?"
-wisp chat -a wisp/scheduler -m "Find me 30 minutes for a call"
+wisp chat -a wisp -m "What's on my calendar this week?"
+wisp chat -a wisp -m "Find me 30 minutes for a call"
 ```
 
 **Step 4: Final commit**

@@ -8,7 +8,7 @@ spec :: Spec
 spec = describe "Concierge" $ do
   describe "agentInfo" $ do
     it "has correct id" $ do
-      agentId agentInfo `shouldBe` "wisp/concierge"
+      agentId agentInfo `shouldBe` "concierge"
 
     it "is marked as implemented" $ do
       agentImplemented agentInfo `shouldBe` True

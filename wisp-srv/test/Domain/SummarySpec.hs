@@ -10,7 +10,7 @@ spec = describe "Summary" $ do
   it "serializes Summary to JSON" $ do
     let summary = Summary
           { summaryId = SummaryId "sum-123"
-          , summaryAgentId = "wisp/scheduler"
+          , summaryAgentId = "wisp"
           , summarySessionIds = ["sess-1", "sess-2"]
           , summaryContent = "Discussed scheduling preferences"
           , summaryCreatedAt = read "2026-02-18 12:00:00 UTC"

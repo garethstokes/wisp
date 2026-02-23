@@ -2,7 +2,7 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Implement wisp/insights agent for activity summaries, search, and contact insights.
+**Goal:** Implement wisp agent for activity summaries, search, and contact insights.
 
 **Architecture:** The insights agent handles retrospective queries via chat. It searches activities, generates summaries over time periods, and provides insights about contacts. Uses the same LLM chat pattern as Scheduler but with search and aggregation tools.
 
@@ -400,7 +400,7 @@ stripCodeBlock t =
 
 agentInfo :: AgentInfo
 agentInfo = AgentInfo
-  { agentId = "wisp/insights"
+  { agentId = "wisp"
   , agentDescription = "Activity search, summaries, and contact insights"
   , agentTools =
       [ ToolInfo "search_activities" Decision
@@ -490,10 +490,10 @@ git commit -m "fix: add timezone support to insights agent"
 Replace the insights dispatch case in `wisp-srv/src/Agents/Dispatcher.hs`:
 
 ```haskell
-dispatchChat "wisp/insights" msgs tz = Insights.handleChat msgs tz
+dispatchChat "wisp" msgs tz = Insights.handleChat msgs tz
 ```
 
-(Change from: `dispatchChat "wisp/insights" _ _ = pure $ Left "Agent 'wisp/insights' not yet implemented"`)
+(Change from: `dispatchChat "wisp" _ _ = pure $ Left "Agent 'wisp' not yet implemented"`)
 
 **Step 2: Run build to verify**
 
@@ -533,7 +533,7 @@ spec = do
   describe "Insights" $ do
     describe "agentInfo" $ do
       it "has correct agent ID" $ do
-        agentId agentInfo `shouldBe` "wisp/insights"
+        agentId agentInfo `shouldBe` "wisp"
 
       it "is marked as implemented" $ do
         agentImplemented agentInfo `shouldBe` True
@@ -613,7 +613,7 @@ git commit -m "test: add insights agent tests"
 Replace the insights section in `docs/agents.md`:
 
 ```markdown
-### wisp/insights [IMPLEMENTED]
+### wisp [IMPLEMENTED]
 
 Activity search, summaries, and contact insights.
 
@@ -729,9 +729,9 @@ Expected: All tests pass
 **Step 3: Test manually (optional)**
 
 ```bash
-wisp chat -a wisp/insights -m "Search for emails about meetings"
-wisp chat -a wisp/insights -m "How many activities did I have today?"
-wisp chat -a wisp/insights -m "Who do I interact with most?"
+wisp chat -a wisp -m "Search for emails about meetings"
+wisp chat -a wisp -m "How many activities did I have today?"
+wisp chat -a wisp -m "Who do I interact with most?"
 ```
 
 **Step 4: Final commit (if any cleanup needed)**

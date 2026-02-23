@@ -12,10 +12,10 @@ spec = describe "Session" $ do
     it "serializes Session to JSON" $ do
       let session = Session
             { sessionId = SessionId "sess-123"
-            , sessionAgentId = "wisp/concierge"
+            , sessionAgentId = "wisp"
             , sessionMessages = []
             , sessionCreatedAt = read "2026-02-18 10:00:00 UTC"
             , sessionEndedAt = Nothing
             , sessionSummarized = False
             }
-      unpack (encode session) `shouldContain` "\"agent_id\":\"wisp/concierge\""
+      unpack (encode session) `shouldContain` "\"agent_id\":\"wisp\""

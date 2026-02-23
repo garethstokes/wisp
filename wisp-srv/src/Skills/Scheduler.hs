@@ -550,7 +550,7 @@ stripCodeBlock t =
 
 agentInfo :: AgentInfo
 agentInfo = AgentInfo
-  { agentId = "wisp/scheduler"
+  { agentId = "scheduler"
   , agentDescription = "Calendar reasoning, schedule queries, finding free time"
   , agentTools =
       [ ToolInfo "query_calendar" Decision

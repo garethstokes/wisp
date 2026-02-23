@@ -46,7 +46,7 @@ Activity (source: Note)
 ├── raw: {
 │     origin: "chat" | "manual" | "reflection" | "import"
 │     session_id: "..."
-│     agent_id: "wisp/concierge"
+│     agent_id: "wisp"
 │     source_message: "Note: Alice is my sister..."
 │     created_by: "user" | "agent_proposed"
 │   }
@@ -73,7 +73,7 @@ Raw conversation pages:
 ```
 Session
 ├── id: UUID
-├── agent_id: "wisp/concierge"
+├── agent_id: "wisp"
 ├── messages: [ChatMessage]
 ├── created_at: timestamp
 ├── ended_at: timestamp | null
@@ -87,7 +87,7 @@ Compressed sessions:
 ```
 Summary
 ├── id: UUID
-├── agent_id: "wisp/concierge"
+├── agent_id: "wisp"
 ├── session_ids: [UUID] (which sessions this covers)
 ├── content: "Discussed email classification. Decided to..."
 └── created_at: timestamp
@@ -99,7 +99,7 @@ Agent personality and wisdom:
 
 ```
 Soul
-├── agent_id: "wisp/concierge" (primary key)
+├── agent_id: "wisp" (primary key)
 ├── personality: "Concise, uses bullet points, slightly formal"
 ├── insights: [
 │     "Prefers late morning meetings (10am-12pm)",
@@ -134,7 +134,7 @@ Soul
    { source: Note
    , title: "Alice is my sister, works at Google"
    , status: Pending
-   , raw: { origin: "chat", session_id: "...", agent: "wisp/concierge", created_by: "user" }
+   , raw: { origin: "chat", session_id: "...", agent: "wisp", created_by: "user" }
    }
 
 3. Activity enters classification queue (existing pipeline)
@@ -263,7 +263,7 @@ Every piece of knowledge tracks its origin:
 raw: {
   origin: "chat" | "manual" | "reflection" | "import"
   session_id: "..." (if from chat)
-  agent_id: "wisp/scheduler" (which agent captured it)
+  agent_id: "wisp" (which agent captured it)
   source_message: "Note: Alice works at Google"
   created_by: "user" | "agent_proposed"
 }

@@ -665,7 +665,7 @@ statusToReceiptAction Activity.Archived = RoutedToArchived
 
 agentInfo :: AgentInfo
 agentInfo = AgentInfo
-  { agentId = "wisp/concierge"
+  { agentId = "concierge"
   , agentDescription = "Intake, classification, routing, quarantine"
   , agentTools =
       [ ToolInfo "update_activities" Decision

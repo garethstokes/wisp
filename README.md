@@ -93,9 +93,9 @@ wisp approve <ID>        # Move from quarantined to surfaced
 wisp dismiss <ID>        # Archive an activity
 
 # Agent interaction
-wisp chat -a wisp/concierge -m "Show quarantined items"
-wisp chat -a wisp/scheduler -m "What's my schedule today?"
-wisp chat -a wisp/insights -m "Emails from alice@example.com"
+wisp chat -a wisp -m "Show quarantined items"
+wisp activate wisp scheduler
+wisp chat -a wisp -m "What's my schedule today?"
 
 # System operations
 wisp poll                # Trigger email/calendar sync
@@ -107,16 +107,23 @@ wisp runs                # List recent agent runs
 wisp run <ID>            # Full event log for a run
 ```
 
-## Agents
+## Agents and Skills
 
-### Concierge (`wisp/concierge`)
-Manages activities—queries, updates status, handles classification refinement.
+Wisp has one default agent (`wisp`) that can activate different skills:
 
-### Scheduler (`wisp/scheduler`)
-Calendar coordination—schedule queries, free slot finding, meeting assistance.
+| Skill | Purpose |
+|-------|---------|
+| `concierge` | Manages activities—queries, updates status, handles classification |
+| `scheduler` | Calendar coordination—schedule queries, free slot finding |
+| `insights` | Historical search—full-text search, statistics, relationship analysis |
 
-### Insights (`wisp/insights`)
-Historical search—full-text search, statistics, relationship analysis.
+```bash
+# Activate a skill
+wisp activate wisp concierge
+
+# Chat with the agent (uses active skill's tools)
+wisp chat -a wisp -m "Show quarantined items"
+```
 
 ## Documentation
 

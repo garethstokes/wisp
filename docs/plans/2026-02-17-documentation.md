@@ -113,9 +113,9 @@ wisp approve <ID>        # Move from quarantined to surfaced
 wisp dismiss <ID>        # Archive an activity
 
 # Agent interaction
-wisp chat -a wisp/concierge -m "Show quarantined items"
-wisp chat -a wisp/scheduler -m "What's my schedule today?"
-wisp chat -a wisp/insights -m "Emails from alice@example.com"
+wisp chat -a wisp -m "Show quarantined items"
+wisp chat -a wisp -m "What's my schedule today?"
+wisp chat -a wisp -m "Emails from alice@example.com"
 
 # System operations
 wisp poll                # Trigger email/calendar sync
@@ -129,13 +129,13 @@ wisp run <ID>            # Full event log for a run
 
 ## Agents
 
-### Concierge (`wisp/concierge`)
+### Concierge (`wisp`)
 Manages activities—queries, updates status, handles classification refinement.
 
-### Scheduler (`wisp/scheduler`)
+### Scheduler (`wisp`)
 Calendar coordination—schedule queries, free slot finding, meeting assistance.
 
-### Insights (`wisp/insights`)
+### Insights (`wisp`)
 Historical search—full-text search, statistics, relationship analysis.
 
 ## Documentation
@@ -291,7 +291,7 @@ Every agent interaction is captured as a **Run** with immutable **Events**:
 ```haskell
 data Run = Run
   { runId :: RunId
-  , runAgent :: Text                -- "wisp/concierge"
+  , runAgent :: Text                -- "wisp"
   , runStatus :: RunStatus          -- Running | Waiting | Completed | Failed
   , runEvents :: [RunEvent]         -- Append-only log
   }
@@ -359,7 +359,7 @@ When classification confidence < threshold (default 0.7):
 ### Interactive Chat Flow
 
 ```
-1. User: wisp chat -a wisp/scheduler -m "Free time tomorrow?"
+1. User: wisp chat -a wisp -m "Free time tomorrow?"
 
 2. CLI
    └─→ Load session (prior messages)

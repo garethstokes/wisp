@@ -336,6 +336,6 @@ httpGetRaw cfg path = do
 toList :: Foldable t => t a -> [a]
 toList = foldr (:) []
 
--- | URL-encode a path segment (e.g., "wisp/concierge" -> "wisp%2Fconcierge")
+-- | URL-encode a path segment (e.g., "foo/bar" -> "foo%2Fbar")
 encodePathSegment :: Text -> String
 encodePathSegment = T.unpack . TE.decodeUtf8 . urlEncode True . TE.encodeUtf8

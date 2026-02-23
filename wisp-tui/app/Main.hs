@@ -43,7 +43,7 @@ main = do
         , _chatState = ChatState
             { _csMessages = []
             , _csInputBuffer = ""
-            , _csCurrentAgent = "wisp/concierge"
+            , _csCurrentAgent = "wisp"
             , _csCurrentSession = "default"
             , _csStreaming = False
             , _csStreamBuffer = ""
@@ -60,7 +60,7 @@ main = do
 
   -- Load chat session on startup (async)
   void $ async $ do
-    result <- DL.loadChatSession defaultConfig "wisp/concierge"
+    result <- DL.loadChatSession defaultConfig "wisp"
     case result of
       DL.ChatSessionLoaded mSession -> writeBChan chan (ChatSessionLoaded mSession)
       _ -> pure ()

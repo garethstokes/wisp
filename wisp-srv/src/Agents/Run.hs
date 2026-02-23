@@ -32,7 +32,7 @@ data RunContext = RunContext
 -- Creates a run, logs the input event, delegates to the agent,
 -- and logs the outcome (completed/failed)
 withRunLogging
-  :: Text                                                    -- ^ Agent ID (e.g., "wisp/concierge")
+  :: Text                                                    -- ^ Agent ID (e.g., "wisp")
   -> Maybe Text                                              -- ^ Session ID
   -> [ChatMessage]                                           -- ^ Input messages
   -> (RunContext -> [ChatMessage] -> App (Either Text ChatResponse))  -- ^ Handler receives context

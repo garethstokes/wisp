@@ -304,7 +304,7 @@ GET    /runs?status=waiting     -- Find paused runs
 ```
 POST /runs
 {
-  "agent": "wisp/concierge",
+  "agent": "wisp",
   "input_tool": "message_from_user",
   "input_data": "Show me quarantined items",
   "session_id": "default",
@@ -332,7 +332,7 @@ POST /runs/:id/resume
 ## CLI Changes
 
 ```bash
-wisp chat -a wisp/concierge -m "hello"
+wisp chat -a wisp -m "hello"
   # -> POST /runs { agent, input_tool: "message_from_user", ... }
 
 wisp runs                        # List recent runs

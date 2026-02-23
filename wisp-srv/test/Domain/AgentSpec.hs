@@ -20,7 +20,7 @@ spec = describe "Agent" $ do
   describe "AgentInfo" $ do
     it "serializes to JSON" $ do
       let agent = AgentInfo
-            { agentId = "wisp/concierge"
+            { agentId = "concierge"
             , agentDescription = "Intake, classification, routing"
             , agentTools = [ToolInfo "update_activities" Decision]
             , agentWorkflows = ["classify-pending", "quarantine-interview"]

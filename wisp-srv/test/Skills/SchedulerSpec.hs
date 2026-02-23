@@ -11,7 +11,7 @@ spec = do
   describe "Scheduler" $ do
     describe "agentInfo" $ do
       it "has correct agent ID" $ do
-        agentId agentInfo `shouldBe` "wisp/scheduler"
+        agentId agentInfo `shouldBe` "scheduler"
 
       it "is marked as implemented" $ do
         agentImplemented agentInfo `shouldBe` True

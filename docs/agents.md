@@ -13,16 +13,18 @@ Wisp uses a **knowledge-based agent architecture** where agents are personas def
 
 | Concept | Description |
 |---------|-------------|
-| **Agent** | A named persona (e.g., `wisp/concierge`) loaded from knowledge |
+| **Agent** | A named persona (e.g., `wisp`) loaded from knowledge |
 | **Soul** | Persistent personality insights that evolve through interactions |
-| **Skill** | A set of specialized tools an agent can activate |
+| **Skill** | A set of specialized tools an agent can activate at runtime |
 | **Base Tools** | Tools available to all agents (knowledge, notes, skill activation) |
+
+**Important:** An agent is NOT the same as a skill. The agent `wisp` can activate different skills (concierge, scheduler, insights) at runtime. There is no `wisp/concierge` agent — there is a `wisp` agent that can use the `concierge` skill.
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                         Agent                               │
+│                      Agent: wisp                            │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────┐ │
 │  │ Personality │  │    Soul     │  │   Active Skill      │ │
 │  │  (from note)│  │ (evolving)  │  │ (optional, dynamic) │ │
@@ -49,7 +51,7 @@ All agents have access to these tools without needing a skill:
 
 ## Skills
 
-Skills provide specialized tools. An agent can have **one active skill at a time**.
+Skills provide specialized tools. An agent can have **one active skill at a time**. Skills are activated at runtime — they are not baked into agent identity.
 
 ### concierge
 
@@ -105,30 +107,31 @@ Activity search, pattern analysis, and people frequency insights.
 {"tool": "get_people_insights", "search": "bob", "important_only": true}
 ```
 
-## Default Agents
+## Default Agent
 
-These agents are pre-configured in the seed data:
+The seed data creates one agent:
 
-### wisp/concierge
+### wisp
 
-The default chat agent. Handles inbox triage, activity classification, and general assistance.
+The default chat agent. A helpful, proactive assistant that can activate any skill as needed.
 
-- **Personality:** Helpful, concise, focused on communication management
-- **Default Skill:** concierge (can switch to others as needed)
+- **Personality:** Helpful, concise, and proactive. Anticipates needs and offers actionable suggestions.
+- **Default Skill:** None (starts without a skill; user or agent can activate one)
 
-### wisp/scheduler
+To use wisp with a specific skill:
+```bash
+# Chat with wisp (no skill active)
+wisp chat -a wisp -m "Hello"
 
-Specialized for calendar and scheduling tasks.
+# Activate concierge skill
+wisp activate wisp concierge
 
-- **Personality:** Time-aware, efficient, scheduling-focused
-- **Default Skill:** scheduler
+# Now chat uses concierge tools
+wisp chat -a wisp -m "What's in my inbox?"
 
-### wisp/insights
-
-Specialized for analysis and pattern detection.
-
-- **Personality:** Analytical, thorough, pattern-oriented
-- **Default Skill:** insights
+# Switch to scheduler
+wisp activate wisp scheduler
+```
 
 ## Creating a New Agent
 
@@ -137,16 +140,16 @@ Agents are created by adding a note with the `agent:NAME` tag:
 ```bash
 # Via CLI
 wisp notes add "My custom agent personality and instructions" \
-  --tags "agent:wisp/custom"
+  --tags "agent:jarvis"
 
 # Via API
 POST /api/notes
 {
   "content": "You are a specialized agent for...",
-  "tags": ["agent:wisp/custom"],
+  "tags": ["agent:jarvis"],
   "raw": {
     "personality_seed": "Be formal and precise.",
-    "active_skill": "scheduler"
+    "active_skill": null
   }
 }
 ```
@@ -156,9 +159,11 @@ POST /api/notes
 ```json
 {
   "personality_seed": "Your personality description",
-  "active_skill": "concierge"  // optional, null for no skill
+  "active_skill": null
 }
 ```
+
+The `active_skill` field stores the currently active skill. It starts as `null` and is updated when you call `activate_skill` or use the API/CLI to activate.
 
 ## Implementation Details
 
@@ -192,12 +197,15 @@ POST /api/notes
 # List agents
 wisp agents
 
+# Show agent details
+wisp agents wisp
+
 # Chat with an agent
-wisp chat -a wisp/concierge -m "What's in my inbox?"
+wisp chat -a wisp -m "What's in my inbox?"
 
 # Activate a skill
-wisp agents activate wisp/concierge scheduler
+wisp activate wisp concierge
 
 # Deactivate skill
-wisp agents deactivate wisp/concierge
+wisp deactivate wisp
 ```

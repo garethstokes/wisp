@@ -128,7 +128,7 @@ spec = describe "Run" $ do
       let run = Run
             { runId = RunId "run123"
             , runParentRunId = Nothing
-            , runAgent = "wisp/concierge"
+            , runAgent = "wisp"
             , runSessionId = Just "default"
             , runCreatedAt = testTime
             , runUpdatedAt = testTime
@@ -137,5 +137,5 @@ spec = describe "Run" $ do
             }
       let json = LBS.unpack (encode run)
       json `shouldContain` "\"id\":\"run123\""
-      json `shouldContain` "\"agent\":\"wisp/concierge\""
+      json `shouldContain` "\"agent\":\"wisp\""
       json `shouldContain` "\"status\":\"completed\""

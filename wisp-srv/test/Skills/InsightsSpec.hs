@@ -11,7 +11,7 @@ spec = do
   describe "Insights" $ do
     describe "agentInfo" $ do
       it "has correct agent ID" $ do
-        agentId agentInfo `shouldBe` "wisp/insights"
+        agentId agentInfo `shouldBe` "insights"
 
       it "is marked as implemented" $ do
         agentImplemented agentInfo `shouldBe` True

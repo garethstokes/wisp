@@ -440,7 +440,7 @@ stripCodeBlock t =
 
 agentInfo :: AgentInfo
 agentInfo = AgentInfo
-  { agentId = "wisp/insights"
+  { agentId = "insights"
   , agentDescription = "Retrieval, summaries, feedback clustering"
   , agentTools =
       [ ToolInfo "search_activities" Decision

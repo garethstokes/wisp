@@ -182,7 +182,7 @@ When information is corrected:
   "activity_id": "email-123",
   "description": "Extracted contact info from email signature",
   "source": "agent",
-  "agent_id": "wisp/concierge"
+  "agent_id": "wisp"
 }
 ```
 

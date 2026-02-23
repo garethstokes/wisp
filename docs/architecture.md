@@ -117,7 +117,7 @@ Every agent interaction is captured as a **Run** with immutable **Events**:
 ```haskell
 data Run = Run
   { runId :: RunId
-  , runAgent :: Text                -- "wisp/concierge"
+  , runAgent :: Text                -- "wisp"
   , runStatus :: RunStatus          -- Running | Waiting | Completed | Failed
   , runEvents :: [RunEvent]         -- Append-only log
   }
@@ -185,7 +185,7 @@ When classification confidence < threshold (default 0.7):
 ### Interactive Chat Flow
 
 ```
-1. User: wisp chat -a wisp/scheduler -m "Free time tomorrow?"
+1. User: wisp chat -a wisp -m "Free time tomorrow?"
 
 2. CLI
    └─→ Load session (prior messages)

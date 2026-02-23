@@ -176,7 +176,7 @@ data RunContext = RunContext
 -- Creates a run, logs the input event, delegates to the agent,
 -- and logs the outcome (completed/failed)
 withRunLogging
-  :: Text                                         -- ^ Agent ID (e.g., "wisp/concierge")
+  :: Text                                         -- ^ Agent ID (e.g., "wisp")
   -> Maybe Text                                   -- ^ Session ID
   -> [ChatMessage]                                -- ^ Input messages
   -> ([ChatMessage] -> App (Either Text ChatResponse))  -- ^ The agent's handleChat
@@ -268,10 +268,10 @@ Replace the dispatchChat function body to use withRunLogging:
 dispatchChat :: Text -> [ChatMessage] -> Maybe Text -> App (Either Text ChatResponse)
 dispatchChat agent msgs tz = withRunLogging agent Nothing msgs $ \messages ->
   case agent of
-    "wisp/concierge" -> Concierge.handleChat messages tz
-    "wisp/scheduler" -> Scheduler.handleChat messages tz
+    "wisp" -> Concierge.handleChat messages tz
+    "wisp" -> Scheduler.handleChat messages tz
     "wisp/housekeeper" -> pure $ Left "Agent 'wisp/housekeeper' not yet implemented"
-    "wisp/insights" -> Insights.handleChat messages tz
+    "wisp" -> Insights.handleChat messages tz
     _ -> pure $ Left $ "Unknown agent: " <> agent
 ```
 
@@ -359,7 +359,7 @@ Using curl or the CLI:
 curl -X POST http://localhost:3000/chat \
   -H "Content-Type: application/json" \
   -d '{
-    "agent": "wisp/concierge",
+    "agent": "wisp",
     "messages": [{"role": "user", "content": "hello"}]
   }'
 ```
