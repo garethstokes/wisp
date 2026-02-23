@@ -10,7 +10,11 @@ import Tui.Types (Name)
 
 -- | Render text as markdown with basic formatting
 renderMarkdown :: Text -> Widget Name
-renderMarkdown content = vBox $ map renderLine $ T.lines content
+renderMarkdown content = vBox $ map renderLine $ T.lines $ unescapeNewlines content
+
+-- | Convert literal \n sequences to actual newlines
+unescapeNewlines :: Text -> Text
+unescapeNewlines = T.replace "\\n" "\n"
 
 renderLine :: Text -> Widget Name
 renderLine line

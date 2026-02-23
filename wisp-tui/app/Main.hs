@@ -359,6 +359,7 @@ handleSSEEvent (DoneEvent _ _) = do
   modify $ chatState . csStreamBuffer .~ ""
   modify $ chatState . csStreaming .~ False
   modify $ chatState . csToolCalls .~ []
+  modify $ statusMessage .~ Nothing
 handleSSEEvent (ErrorEvent msg _) = do
   now <- liftIO getCurrentTime
   modify $ statusMessage .~ Just (msg, now, StatusError)
