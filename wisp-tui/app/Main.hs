@@ -90,6 +90,12 @@ theMap = attrMap V.defAttr
   , (attrName "assistantRole", fg V.magenta)
   , (attrName "cursor", V.withStyle V.defAttr V.blink)
   , (attrName "error", fg V.red `V.withStyle` V.bold)
+  , (attrName "toolPending", fg V.yellow)
+  , (attrName "toolComplete", fg V.green)
+  , (attrName "mdHeader", fg V.cyan `V.withStyle` V.bold)
+  , (attrName "mdBold", V.withStyle V.defAttr V.bold)
+  , (attrName "mdCode", fg V.yellow)
+  , (attrName "mdBullet", fg V.cyan)
   ]
 
 drawUI :: AppState -> [Widget Name]
