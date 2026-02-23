@@ -58,10 +58,21 @@ roleAttr _ = attrName "assistantRole"
 streamingIndicator :: ChatState -> [Widget Name]
 streamingIndicator cs
   | cs ^. csStreaming =
-      [ renderMultiline $ cs ^. csStreamBuffer
-      , withAttr (attrName "cursor") $ txt "▌"
-      ]
+      toolCallsWidget (cs ^. csToolCalls)
+      ++ [ padLeft (Pad 2) $ renderMultiline $ cs ^. csStreamBuffer
+         , withAttr (attrName "cursor") $ txt "▌"
+         ]
   | otherwise = []
+
+toolCallsWidget :: [(Text, Maybe Int)] -> [Widget Name]
+toolCallsWidget [] = []
+toolCallsWidget calls = [vBox $ map renderToolCall calls]
+
+renderToolCall :: (Text, Maybe Int) -> Widget Name
+renderToolCall (name, Nothing) =
+  withAttr (attrName "toolPending") $ txt $ "  ⏳ " <> name <> "..."
+renderToolCall (name, Just ms) =
+  withAttr (attrName "toolComplete") $ txt $ "  ✓ " <> name <> " (" <> T.pack (show ms) <> "ms)"
 
 inputWidget :: ChatState -> Widget Name
 inputWidget cs = vLimit 1 $ hBox
