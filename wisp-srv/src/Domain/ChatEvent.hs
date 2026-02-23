@@ -34,6 +34,7 @@ instance ToJSON ToolResultInfo where
 
 data ChatEvent
   = ChunkEvent Text
+  | AgentRunningEvent           -- signals agent started processing
   | ToolCallStartEvent ToolCallInfo
   | ToolCallResultEvent ToolResultInfo
   | DoneEvent Text Int  -- session_id, token_count
@@ -42,6 +43,7 @@ data ChatEvent
 
 instance ToJSON ChatEvent where
   toJSON (ChunkEvent txt) = object ["text" .= txt]
+  toJSON AgentRunningEvent = object []
   toJSON (ToolCallStartEvent info) = toJSON info
   toJSON (ToolCallResultEvent info) = toJSON info
   toJSON (DoneEvent sid tokens) = object ["session_id" .= sid, "token_count" .= tokens]
@@ -52,6 +54,7 @@ chatEventToSSE :: ChatEvent -> BL.ByteString
 chatEventToSSE evt =
   let (eventName, payload) = case evt of
         ChunkEvent _ -> ("chunk", encode evt)
+        AgentRunningEvent -> ("agent_running", encode evt)
         ToolCallStartEvent _ -> ("tool_call_start", encode evt)
         ToolCallResultEvent _ -> ("tool_call_result", encode evt)
         DoneEvent _ _ -> ("done", encode evt)
