@@ -1,11 +1,14 @@
 module Infra.GitHub.Commits
   ( fetchCommitDiff
   , fetchCompareDiff
+  , fetchCompareCommits
   , CommitWithDiff(..)
   , PushDiff(..)
+  , CompareCommit(..)
   ) where
 
-import Data.Aeson (ToJSON(..), FromJSON(..), object, (.=), (.:), (.:?), withObject)
+import Data.Aeson (ToJSON(..), FromJSON(..), object, (.=), (.:), (.:?), withObject, eitherDecode, Value)
+import Data.Aeson.Types (parseMaybe)
 import Data.Text (Text)
 import qualified Data.Text as T
 import qualified Data.Text.Encoding as TE
@@ -13,6 +16,7 @@ import qualified Data.ByteString.Lazy as LBS
 import Network.HTTP.Client
 import Network.HTTP.Client.TLS (tlsManagerSettings)
 import Network.HTTP.Types.Status (statusCode)
+import GHC.Generics (Generic)
 
 -- | A commit with its diff content
 data CommitWithDiff = CommitWithDiff
@@ -124,3 +128,59 @@ fetchCompareDiff owner repo baseSha headSha accessToken = do
     404 -> pure $ Left "404: Commits not found (may have been force-pushed)"
     403 -> pure $ Left "403: Rate limited or access denied"
     _ -> pure $ Left $ "GitHub API error: " <> T.pack (show status)
+
+-- | A commit from the compare API response
+data CompareCommit = CompareCommit
+  { ccSha :: Text
+  , ccMessage :: Text
+  , ccAuthorName :: Text
+  , ccUrl :: Text
+  } deriving (Show, Eq, Generic)
+
+instance FromJSON CompareCommit where
+  parseJSON = withObject "CompareCommit" $ \v -> do
+    sha <- v .: "sha"
+    commit <- v .: "commit"
+    message <- commit .: "message"
+    author <- commit .: "author"
+    authorName <- author .: "name"
+    url <- v .: "html_url"
+    pure $ CompareCommit sha message authorName url
+
+-- | Fetch the list of commits between two SHAs using GitHub's compare API
+-- Returns the commits in the comparison or an error message
+fetchCompareCommits
+  :: Text  -- ^ Repository owner
+  -> Text  -- ^ Repository name
+  -> Text  -- ^ Base SHA (before)
+  -> Text  -- ^ Head SHA (after)
+  -> Text  -- ^ Access token
+  -> IO (Either Text [CompareCommit])
+fetchCompareCommits owner repo baseSha headSha accessToken = do
+  manager <- newManager tlsManagerSettings
+  let url = "https://api.github.com/repos/" <> T.unpack owner <> "/" <> T.unpack repo
+            <> "/compare/" <> T.unpack baseSha <> "..." <> T.unpack headSha
+  req <- parseRequest url
+  let headers =
+        [ ("Authorization", "Bearer " <> TE.encodeUtf8 accessToken)
+        , ("User-Agent", "wisp-srv")
+        , ("Accept", "application/vnd.github+json")
+        ]
+  let authReq = req { requestHeaders = headers }
+  response <- httpLbs authReq manager
+
+  let status = statusCode (responseStatus response)
+  case status of
+    200 -> do
+      -- Parse JSON response and extract commits array
+      case eitherDecode (responseBody response) of
+        Left err -> pure $ Left $ "JSON parse error: " <> T.pack err
+        Right val -> case parseCommitsFromCompare val of
+          Nothing -> pure $ Left "Could not extract commits from response"
+          Just commits -> pure $ Right commits
+    404 -> pure $ Left "404: Commits not found (may have been force-pushed)"
+    403 -> pure $ Left "403: Rate limited or access denied"
+    _ -> pure $ Left $ "GitHub API error: " <> T.pack (show status)
+  where
+    parseCommitsFromCompare :: Value -> Maybe [CompareCommit]
+    parseCommitsFromCompare = parseMaybe $ withObject "CompareResponse" $ \v -> v .: "commits"

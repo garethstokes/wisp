@@ -5,6 +5,7 @@ module Services.GitHubPoller
   , buildCommitActivity
   , buildPushEventParent
   , backfillPushEventDiffs
+  , splitExistingPushEvents
   ) where
 
 import Control.Monad (forM, forM_, void)
@@ -25,7 +26,7 @@ import Infra.Db.Activity (insertActivity, insertActivityWithParent, activityExis
 import Infra.Db.PollState (getPollStateForAccount, updatePollStateForAccount, ensurePollStateExists, PollState(..))
 import Infra.GitHub.Events (GitHubEvent(..), EventsResponse(..), listEvents, extractEventTitle, CommitInfo(..), extractCommitsFromPayload)
 import Data.Time (UTCTime)
-import Infra.GitHub.Commits (fetchCommitDiff, fetchCompareDiff, PushDiff(..))
+import Infra.GitHub.Commits (fetchCommitDiff, fetchCompareDiff, fetchCompareCommits, PushDiff(..), CompareCommit(..))
 
 -- | Build a NewActivity from a GitHubEvent
 buildActivityFromEvent :: EntityId -> GitHubEvent -> NewActivity
@@ -299,3 +300,104 @@ enrichActivityRaw token activity = do
                 _ -> Object KM.empty
           pure $ Just $ Object $ KM.insert "ghEventPayload" newPayload obj
     _ -> pure Nothing
+
+-- | Split existing large PushEvents into parent + child commit activities
+-- This backfills existing data to use the new split approach
+-- minSizeBytes: only process PushEvents with raw JSON larger than this (e.g., 100000 for 100KB)
+splitExistingPushEvents :: Int -> App Text
+splitExistingPushEvents minSizeBytes = do
+  -- Get GitHub accounts
+  accounts <- getAccountsByProvider GitHub
+
+  totalSplit <- fmap sum $ forM accounts $ \acc -> do
+    case (accountIdentifier acc, getAccessToken acc) of
+      (Just _username, Just token) -> do
+        -- Get all activities (up to 1000)
+        activities <- getActivitiesPaginated 1000 0
+        let largePushEvents = filter (needsSplit minSizeBytes) activities
+
+        -- Process each large PushEvent
+        splitCount <- forM largePushEvents $ \activity -> do
+          result <- splitPushEventActivity token activity
+          case result of
+            Left err -> do
+              liftIO $ putStrLn $ "Error splitting " <> T.unpack (Activity.activitySourceId activity) <> ": " <> T.unpack err
+              pure (0 :: Int)
+            Right childCount -> do
+              liftIO $ putStrLn $ "Split " <> T.unpack (Activity.activitySourceId activity) <> " into " <> show childCount <> " child activities"
+              pure 1
+        pure $ sum splitCount
+      _ -> pure 0
+
+  pure $ "Split " <> T.pack (show totalSplit) <> " PushEvent activities"
+
+-- | Check if a PushEvent activity needs to be split (is large and has push_diff)
+needsSplit :: Int -> Activity.Activity -> Bool
+needsSplit minSizeBytes a =
+  Activity.activitySource a == Activity.GitHubEvent
+  && maybe False (T.isPrefixOf "PushEvent") (Activity.activityTitle a)
+  && hasPushDiff (Activity.activityRaw a)
+  && rawSize (Activity.activityRaw a) >= minSizeBytes
+  where
+    hasPushDiff (Object obj) = case KM.lookup "ghEventPayload" obj of
+      Just (Object p) -> KM.member "push_diff" p
+      _ -> False
+    hasPushDiff _ = False
+
+    rawSize :: Value -> Int
+    rawSize v = T.length $ T.pack $ show v  -- Rough size estimate
+
+-- | Split a single PushEvent activity into parent + children
+splitPushEventActivity :: Text -> Activity.Activity -> App (Either Text Int)
+splitPushEventActivity token activity = do
+  case Activity.activityRaw activity of
+    Object obj -> do
+      -- Extract repo and SHAs
+      let repoName = case KM.lookup "ghEventRepo" obj of
+            Just (String n) -> n
+            _ -> ""
+          (owner, repo) = splitRepoName repoName
+          (baseSha, headSha) = case KM.lookup "ghEventPayload" obj of
+            Just payload -> extractPushShas payload
+            _ -> ("", "")
+          eventTime = Activity.activityCreatedAt activity
+
+      if T.null owner || T.null baseSha || T.null headSha
+        then pure $ Left "Missing repo or SHA info"
+        else do
+          -- Fetch commits from GitHub compare API
+          mCommits <- liftIO $ fetchCompareCommits owner repo baseSha headSha token
+          case mCommits of
+            Left err -> pure $ Left err
+            Right commits -> do
+              -- Create child activities for each commit
+              let accId = Activity.activityAccountId activity
+                  parentId = Activity.activityId activity
+
+              forM_ commits $ \commit -> do
+                -- Convert CompareCommit to CommitInfo
+                let commitInfo = CommitInfo
+                      { commitSha = ccSha commit
+                      , commitMessage = ccMessage commit
+                      , commitAuthor = ccAuthorName commit
+                      , commitUrl = ccUrl commit
+                      }
+
+                -- Fetch individual diff
+                mDiff <- liftIO $ fetchCommitDiff owner repo (ccSha commit) token
+                let diff = either (const Nothing) Just mDiff
+                    childActivity = buildCommitActivity accId parentId repoName commitInfo diff eventTime
+
+                -- Insert child (skip if already exists)
+                void $ insertActivityWithParent childActivity (Just parentId)
+
+              -- Strip push_diff from parent activity
+              let strippedPayload = case KM.lookup "ghEventPayload" obj of
+                    Just (Object p) -> Object $ KM.delete "push_diff" p
+                    Just other -> other
+                    Nothing -> Object KM.empty
+                  newRaw = Object $ KM.insert "ghEventPayload" strippedPayload obj
+              updateActivityRaw parentId newRaw
+
+              pure $ Right (length commits)
+    _ -> pure $ Left "Activity raw is not an object"
