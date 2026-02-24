@@ -3,14 +3,19 @@ module Infra.GitHub.Events
   , EventsResponse(..)
   , listEvents
   , extractEventTitle
+  , CommitInfo(..)
+  , extractCommitsFromPayload
   ) where
 
-import Data.Aeson (FromJSON(..), ToJSON(..), Value, (.:), withObject, genericToJSON, defaultOptions)
+import Data.Aeson (FromJSON(..), ToJSON(..), Value(..), (.:), withObject, genericToJSON, defaultOptions)
 import qualified Data.Aeson as Aeson
+import qualified Data.Aeson.KeyMap as KM
 import Data.Text (Text)
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
 import Data.Time (UTCTime)
+import Data.Maybe (mapMaybe)
+import Data.Foldable (toList)
 import GHC.Generics (Generic)
 import Network.HTTP.Client
 import Network.HTTP.Client.TLS (tlsManagerSettings)
@@ -48,6 +53,41 @@ data EventsResponse = EventsResponse
   , eventsETag :: Maybe Text
   , eventsNotModified :: Bool
   } deriving (Show)
+
+-- | Commit info extracted from PushEvent payload
+data CommitInfo = CommitInfo
+  { commitSha :: Text
+  , commitMessage :: Text
+  , commitAuthor :: Text
+  , commitUrl :: Text
+  } deriving (Show, Eq)
+
+-- | Extract commits from PushEvent payload JSON
+extractCommitsFromPayload :: Value -> [CommitInfo]
+extractCommitsFromPayload (Object obj) =
+  case KM.lookup "commits" obj of
+    Just (Aeson.Array arr) -> mapMaybe parseCommit (toList arr)
+    _ -> []
+  where
+    parseCommit :: Value -> Maybe CommitInfo
+    parseCommit (Object c) = do
+      sha <- case KM.lookup "sha" c of
+               Just (String s) -> Just s
+               _ -> Nothing
+      message <- case KM.lookup "message" c of
+                   Just (String s) -> Just s
+                   _ -> Nothing
+      author <- case KM.lookup "author" c of
+                  Just (Object a) -> case KM.lookup "name" a of
+                                       Just (String s) -> Just s
+                                       _ -> Nothing
+                  _ -> Nothing
+      url <- case KM.lookup "url" c of
+               Just (String s) -> Just s
+               _ -> Nothing
+      pure $ CommitInfo sha message author url
+    parseCommit _ = Nothing
+extractCommitsFromPayload _ = []
 
 -- Fetch events for a user, with optional ETag for caching
 -- Returns (events, Maybe newETag, notModified)

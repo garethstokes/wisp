@@ -269,6 +269,7 @@ test-suite wisp-srv-test
         Infra.GitHub.Auth
         Infra.GitHub.AuthSpec
         Infra.GitHub.Commits
+        Infra.GitHub.CommitExtractionSpec
         Infra.GitHub.Events
         Infra.GitHub.EventsSpec
         Infra.Google.Auth
