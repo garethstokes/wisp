@@ -2,11 +2,12 @@
 module Services.Scheduler
   ( startPolling
   , runPollCycle
+  , runLibrarianTask
   ) where
 
 import Control.Concurrent (threadDelay)
 import Control.Concurrent.Async (async, link)
-import Control.Monad (forever)
+import Control.Monad (forever, forM_)
 import Control.Monad.IO.Class (liftIO)
 import qualified Data.Text as T
 import Data.Text.Encoding (encodeUtf8)
@@ -18,6 +19,7 @@ import Services.GmailPoller (pollAllGmail)
 import Services.CalendarPoller (pollAllCalendar)
 import Services.GitHubPoller (pollAllGitHub)
 import Services.ClassificationQueue (enqueueActivities)
+import qualified Skills.Librarian as Librarian
 
 -- Helper to log within App monad
 logInfo :: T.Text -> App ()
@@ -111,3 +113,17 @@ startPolling env = do
 
   -- Link thread so exceptions propagate
   link pollThread
+
+-- | Run the Librarian skill to maintain project knowledge
+runLibrarianTask :: App ()
+runLibrarianTask = do
+  logInfo "Starting Librarian task"
+  results <- Librarian.runLibrarian
+  forM_ results $ \r -> do
+    let projectName = Librarian.lrProjectName r
+        updatedCount = length (Librarian.lrUpdatedDocs r)
+        skippedCount = length (Librarian.lrSkippedDocs r)
+    logInfo $ "  Librarian [" <> projectName <> "]: "
+           <> T.pack (show updatedCount) <> " docs updated, "
+           <> T.pack (show skippedCount) <> " skipped"
+  logInfo $ "Librarian task complete: processed " <> T.pack (show (length results)) <> " projects"
