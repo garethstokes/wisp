@@ -6,8 +6,9 @@ module Skills.Librarian
   , LibrarianResult(..)
   ) where
 
-import Control.Monad (forM)
+import Control.Monad (forM, when)
 import Control.Monad.IO.Class (liftIO)
+import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Aeson (Result(..), FromJSON(..), ToJSON(..), Value(..), decode, fromJSON, toJSON, withObject, (.:?))
 import Data.Aeson.Types (Parser)
 import qualified Data.Aeson.Key as Key
@@ -40,6 +41,7 @@ data LibrarianResult = LibrarianResult
   , lrProjectName :: Text
   , lrUpdatedDocs :: [ProjectKnowledgeKind]
   , lrSkippedDocs :: [ProjectKnowledgeKind]
+  , lrLogs :: [Text]  -- Execution logs for debugging
   } deriving (Show)
 
 --------------------------------------------------------------------------------
@@ -58,41 +60,112 @@ runLibrarianForProject :: Document -> App (Maybe LibrarianResult)
 runLibrarianForProject doc = do
   -- Parse project data
   case fromJSON (documentData doc) :: Result ExtendedProjectData of
-    Error _ -> pure Nothing
+    Error err -> do
+      let errLog = "Failed to parse project data: " <> T.pack err
+      liftIO $ putStrLn $ "[Librarian] " <> T.unpack errLog
+      pure $ Just LibrarianResult
+        { lrProjectId = documentId doc
+        , lrProjectName = "(parse error)"
+        , lrUpdatedDocs = []
+        , lrSkippedDocs = []
+        , lrLogs = [errLog]
+        }
     Success projData -> do
+      let log1 = "Processing project: " <> extProjectName projData
+      liftIO $ putStrLn $ "[Librarian] " <> T.unpack log1
+
       -- Get linked activities
       links <- getDocumentActivities (documentId doc) 100
+      let log2 = "Found " <> T.pack (show (length links)) <> " linked activities"
+      liftIO $ putStrLn $ "[Librarian] " <> T.unpack log2
+
       if null links
-        then pure Nothing
+        then do
+          let log3 = "No linked activities, skipping"
+          liftIO $ putStrLn $ "[Librarian] " <> T.unpack log3
+          pure $ Just LibrarianResult
+            { lrProjectId = documentId doc
+            , lrProjectName = extProjectName projData
+            , lrUpdatedDocs = []
+            , lrSkippedDocs = [ProductResearch, Roadmap, Architecture, ActivityLog]
+            , lrLogs = [log1, log2, log3]
+            }
         else do
           -- Fetch activity details
           activities <- forM links $ \link -> getActivity (adActivityId link)
           let validActivities = catMaybes activities
+          let log3 = "Loaded " <> T.pack (show (length validActivities)) <> " activity details"
+          liftIO $ putStrLn $ "[Librarian] " <> T.unpack log3
+
+          -- Sample activities for the log
+          let sampleTitles = T.intercalate ", " $ take 3 $ mapMaybe activityTitle validActivities
+          let log3b = "Sample activities: " <> sampleTitles
+          liftIO $ putStrLn $ "[Librarian] " <> T.unpack log3b
 
           -- Get existing child knowledge docs
           children <- getProjectChildren (documentId doc)
+          let log4 = "Found " <> T.pack (show (length children)) <> " existing child docs"
+          liftIO $ putStrLn $ "[Librarian] " <> T.unpack log4
 
           -- Check for GitHub enrichment
           let mRepoTag = findRepoTag (documentTags doc)
-          githubData <- case mRepoTag of
-            Nothing -> pure Nothing
-            Just repo -> getGitHubEnrichment repo
+          (githubData, log5) <- case mRepoTag of
+            Nothing -> do
+              let l = "No repo tag, skipping GitHub enrichment"
+              liftIO $ putStrLn $ "[Librarian] " <> T.unpack l
+              pure (Nothing, l)
+            Just repo -> do
+              let l = "Fetching GitHub data for: " <> repo
+              liftIO $ putStrLn $ "[Librarian] " <> T.unpack l
+              d <- getGitHubEnrichment repo
+              pure (d, l)
 
           -- Build and call LLM
           let prompt = buildLibrarianPrompt projData validActivities children githubData
+          let log6 = "Built prompt (" <> T.pack (show (T.length prompt)) <> " chars)"
+          liftIO $ putStrLn $ "[Librarian] " <> T.unpack log6
+
+          let log7 = "Calling Claude API..."
+          liftIO $ putStrLn $ "[Librarian] " <> T.unpack log7
+
           cfg <- getConfig
           result <- liftIO $ callClaude (cfg.claude.apiKey) (cfg.claude.model) prompt
 
           case result of
-            Left _ -> pure Nothing
+            Left err -> do
+              let log8 = "Claude API error: " <> err
+              liftIO $ putStrLn $ "[Librarian] " <> T.unpack log8
+              pure $ Just LibrarianResult
+                { lrProjectId = documentId doc
+                , lrProjectName = extProjectName projData
+                , lrUpdatedDocs = []
+                , lrSkippedDocs = [ProductResearch, Roadmap, Architecture, ActivityLog]
+                , lrLogs = [log1, log2, log3, log3b, log4, log5, log6, log7, log8]
+                }
             Right respText -> do
+              let log8 = "Got response (" <> T.pack (show (T.length respText)) <> " chars)"
+              liftIO $ putStrLn $ "[Librarian] " <> T.unpack log8
+
+              let log9 = "Response preview: " <> T.take 300 respText
+              liftIO $ putStrLn $ "[Librarian] " <> T.unpack log9
+
               -- Parse and persist updates
-              (updated, skipped) <- parseAndPersistUpdates (documentId doc) children respText
+              (updated, skipped, parseError) <- parseAndPersistUpdates (documentId doc) children respText
+              let log10 = if T.null parseError
+                          then "Parse successful"
+                          else "Parse error: " <> parseError
+              when (not $ T.null parseError) $
+                liftIO $ putStrLn $ "[Librarian] " <> T.unpack log10
+
+              let log11 = "Result: Updated " <> T.pack (show (length updated)) <> ", Skipped " <> T.pack (show (length skipped))
+              liftIO $ putStrLn $ "[Librarian] " <> T.unpack log11
+
               pure $ Just LibrarianResult
                 { lrProjectId = documentId doc
                 , lrProjectName = extProjectName projData
                 , lrUpdatedDocs = updated
                 , lrSkippedDocs = skipped
+                , lrLogs = [log1, log2, log3, log3b, log4, log5, log6, log7, log8, log9, log10, log11]
                 }
 
 --------------------------------------------------------------------------------
@@ -300,10 +373,16 @@ instance FromJSON LibrarianResponse where
             Error e -> pure $ Left $ T.pack e
 
 -- | Parse LLM response and persist updates
-parseAndPersistUpdates :: EntityId -> [Document] -> Text -> App ([ProjectKnowledgeKind], [ProjectKnowledgeKind])
+-- Returns (updated, skipped, parseError)
+parseAndPersistUpdates :: EntityId -> [Document] -> Text -> App ([ProjectKnowledgeKind], [ProjectKnowledgeKind], Text)
 parseAndPersistUpdates projectId children respText = do
-  case decode (TLE.encodeUtf8 $ TL.fromStrict respText) :: Maybe LibrarianResponse of
-    Nothing -> pure ([], [ProductResearch, Roadmap, Architecture, ActivityLog])
+  -- Try to extract JSON from response (LLM might include markdown)
+  let cleanedText = extractJson respText
+  case decode (TLE.encodeUtf8 $ TL.fromStrict cleanedText) :: Maybe LibrarianResponse of
+    Nothing -> do
+      -- Try to see what went wrong
+      let preview = T.take 200 cleanedText
+      pure ([], [ProductResearch, Roadmap, Architecture, ActivityLog], "Failed to parse JSON: " <> preview)
     Just resp -> do
       -- Process each document type
       prResult <- processUpdate projectId children ProductResearch (lrRespProductResearch resp)
@@ -314,7 +393,20 @@ parseAndPersistUpdates projectId children respText = do
       let results = [(ProductResearch, prResult), (Roadmap, rmResult), (Architecture, arResult), (ActivityLog, alResult)]
       let updated = [k | (k, True) <- results]
       let skipped = [k | (k, False) <- results]
-      pure (updated, skipped)
+      pure (updated, skipped, "")
+
+-- | Extract JSON from response (handles markdown code blocks)
+extractJson :: Text -> Text
+extractJson txt
+  | "```json" `T.isInfixOf` txt =
+      let afterStart = T.drop 1 $ T.dropWhile (/= '\n') $ snd $ T.breakOn "```json" txt
+          beforeEnd = fst $ T.breakOn "```" afterStart
+      in T.strip beforeEnd
+  | "```" `T.isInfixOf` txt =
+      let afterStart = T.drop 1 $ T.dropWhile (/= '\n') $ snd $ T.breakOn "```" txt
+          beforeEnd = fst $ T.breakOn "```" afterStart
+      in T.strip beforeEnd
+  | otherwise = T.strip txt
 
 -- | Process a single document type update
 processUpdate :: ToJSON a => EntityId -> [Document] -> ProjectKnowledgeKind -> Either Text a -> App Bool

@@ -190,6 +190,7 @@ librarianResultToJson r = object
   , "project_name" .= Librarian.lrProjectName r
   , "updated" .= map show (Librarian.lrUpdatedDocs r)
   , "skipped" .= map show (Librarian.lrSkippedDocs r)
+  , "logs" .= Librarian.lrLogs r
   ]
 
 -- | GET /api/projects/suggestions - get new project suggestions based on activity clusters

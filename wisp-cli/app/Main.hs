@@ -1214,7 +1214,14 @@ showLibrarianResult (Object r) = do
   let getSkipped = case KM.lookup "skipped" r of
         Just (Array items) -> [s | String s <- toList items]
         _ -> []
+  let getLogs = case KM.lookup "logs" r of
+        Just (Array items) -> [s | String s <- toList items]
+        _ -> []
   TIO.putStrLn $ "  [" <> getId <> "] " <> getName
+  -- Show logs first
+  TIO.putStrLn "    --- Execution Log ---"
+  forM_ getLogs $ \logLine -> TIO.putStrLn $ "    " <> logLine
+  TIO.putStrLn "    ---------------------"
   if null getUpdated
     then TIO.putStrLn "    Updated: (none)"
     else TIO.putStrLn $ "    Updated: " <> T.intercalate ", " getUpdated
