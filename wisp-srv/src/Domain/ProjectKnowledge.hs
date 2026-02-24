@@ -46,7 +46,7 @@ data KeyContact = KeyContact
 
 instance FromJSON KeyContact where
   parseJSON = withObject "KeyContact" $ \v -> KeyContact
-    <$> v .: "name"
+    <$> v .:? "name" .!= ""
     <*> v .:? "email"
     <*> v .:? "role"
 
@@ -66,7 +66,7 @@ data OpenQuestion = OpenQuestion
 
 instance FromJSON OpenQuestion where
   parseJSON = withObject "OpenQuestion" $ \v -> OpenQuestion
-    <$> v .: "question"
+    <$> v .:? "question" .!= ""
     <*> v .:? "raised_at"
     <*> v .:? "context"
 
@@ -87,7 +87,7 @@ data Milestone = Milestone
 
 instance FromJSON Milestone where
   parseJSON = withObject "Milestone" $ \v -> Milestone
-    <$> v .: "title"
+    <$> v .:? "title" .!= ""
     <*> v .:? "date"
     <*> v .:? "status"
     <*> v .:? "source"
@@ -108,8 +108,8 @@ data ActivityHighlight = ActivityHighlight
 
 instance FromJSON ActivityHighlight where
   parseJSON = withObject "ActivityHighlight" $ \v -> ActivityHighlight
-    <$> v .: "date"
-    <*> v .: "description"
+    <$> v .:? "date" .!= ""
+    <*> v .:? "description" .!= ""
 
 instance ToJSON ActivityHighlight where
   toJSON ah = object
@@ -127,8 +127,8 @@ data ProductResearchData = ProductResearchData
 
 instance FromJSON ProductResearchData where
   parseJSON = withObject "ProductResearchData" $ \v -> ProductResearchData
-    <$> v .: "vision"
-    <*> v .: "value_proposition"
+    <$> v .:? "vision" .!= ""
+    <*> v .:? "value_proposition" .!= ""
     <*> v .:? "key_contacts" .!= []
     <*> v .:? "open_questions" .!= []
 
@@ -150,7 +150,7 @@ data RoadmapData = RoadmapData
 instance FromJSON RoadmapData where
   parseJSON = withObject "RoadmapData" $ \v -> RoadmapData
     <$> v .:? "milestones" .!= []
-    <*> v .: "timeline_notes"
+    <*> v .:? "timeline_notes" .!= ""
 
 instance ToJSON RoadmapData where
   toJSON rd = object
@@ -171,12 +171,12 @@ data ArchitectureData = ArchitectureData
 
 instance FromJSON ArchitectureData where
   parseJSON = withObject "ArchitectureData" $ \v -> ArchitectureData
-    <$> v .: "users_personas"
-    <*> v .: "specs_links"
-    <*> v .: "testing"
-    <*> v .: "code_structure"
-    <*> v .: "data_structure"
-    <*> v .: "infrastructure"
+    <$> v .:? "users_personas" .!= ""
+    <*> v .:? "specs_links" .!= ""
+    <*> v .:? "testing" .!= ""
+    <*> v .:? "code_structure" .!= ""
+    <*> v .:? "data_structure" .!= ""
+    <*> v .:? "infrastructure" .!= ""
 
 instance ToJSON ArchitectureData where
   toJSON ad = object
@@ -191,7 +191,7 @@ instance ToJSON ArchitectureData where
 
 -- | Activity log data for a project
 data ActivityLogData = ActivityLogData
-  { aldGeneratedAt :: UTCTime
+  { aldGeneratedAt :: Maybe UTCTime  -- Optional, will be set by system
   , aldPeriod :: Text
   , aldSummary :: Text
   , aldHighlights :: [ActivityHighlight]
@@ -199,9 +199,9 @@ data ActivityLogData = ActivityLogData
 
 instance FromJSON ActivityLogData where
   parseJSON = withObject "ActivityLogData" $ \v -> ActivityLogData
-    <$> v .: "generated_at"
-    <*> v .: "period"
-    <*> v .: "summary"
+    <$> v .:? "generated_at"
+    <*> v .:? "period" .!= "unknown"
+    <*> v .:? "summary" .!= ""
     <*> v .:? "highlights" .!= []
 
 instance ToJSON ActivityLogData where

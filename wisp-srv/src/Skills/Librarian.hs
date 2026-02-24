@@ -8,7 +8,7 @@ module Skills.Librarian
 
 import Control.Monad (forM, when)
 import Control.Monad.IO.Class (liftIO)
-import Data.Aeson (Result(..), FromJSON(..), ToJSON(..), Value(..), decode, fromJSON, toJSON, withObject, (.:?))
+import Data.Aeson (Result(..), FromJSON(..), ToJSON(..), Value(..), eitherDecode, fromJSON, toJSON, withObject, (.:?))
 import Data.Aeson.Types (Parser)
 import qualified Data.Aeson.Key as Key
 import qualified Data.Aeson.KeyMap as KM
@@ -402,12 +402,11 @@ parseAndPersistUpdates :: EntityId -> [Document] -> Text -> App ([ProjectKnowled
 parseAndPersistUpdates projectId children respText = do
   -- Try to extract JSON from response (LLM might include markdown)
   let cleanedText = extractJson respText
-  case decode (TLE.encodeUtf8 $ TL.fromStrict cleanedText) :: Maybe LibrarianResponse of
-    Nothing -> do
-      -- Try to see what went wrong
-      let preview = T.take 200 cleanedText
-      pure ([], [ProductResearch, Roadmap, Architecture, ActivityLog], "Failed to parse JSON: " <> preview)
-    Just resp -> do
+  case eitherDecode (TLE.encodeUtf8 $ TL.fromStrict cleanedText) :: Either String LibrarianResponse of
+    Left err -> do
+      -- Show specific parse error
+      pure ([], [ProductResearch, Roadmap, Architecture, ActivityLog], "JSON parse error: " <> T.pack err)
+    Right resp -> do
       -- Process each document type
       prResult <- processUpdate projectId children ProductResearch (lrRespProductResearch resp)
       rmResult <- processUpdate projectId children Roadmap (lrRespRoadmap resp)
