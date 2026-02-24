@@ -6,7 +6,7 @@ module Skills.Librarian
   , LibrarianResult(..)
   ) where
 
-import Control.Monad (forM, when)
+import Control.Monad (forM, forM_, when)
 import Control.Monad.IO.Class (liftIO)
 import Data.Aeson (Result(..), FromJSON(..), ToJSON(..), Value(..), eitherDecode, fromJSON, toJSON, withObject, (.:?))
 import Data.Aeson.Types (Parser)
@@ -74,7 +74,7 @@ runLibrarianForProject doc = do
       liftIO $ putStrLn $ "[Librarian] " <> T.unpack log1
 
       -- Get linked activities
-      links <- getDocumentActivities (documentId doc) 100
+      links <- getDocumentActivities (documentId doc) 1000
       let log2 = "Found " <> T.pack (show (length links)) <> " linked activities"
       liftIO $ putStrLn $ "[Librarian] " <> T.unpack log2
 
@@ -390,14 +390,14 @@ instance FromJSON LibrarianResponse where
       parseDocField obj key = do
         mVal <- obj .:? Key.fromText key
         case mVal of
-          Nothing -> pure $ Left "no_change"
+          Nothing -> pure $ Left ("missing:" <> key)
           Just (String "no_change") -> pure $ Left "no_change"
           Just val -> case fromJSON val of
             Success d -> pure $ Right d
-            Error e -> pure $ Left $ T.pack e
+            Error e -> pure $ Left $ "parse_error:" <> key <> ":" <> T.pack e
 
 -- | Parse LLM response and persist updates
--- Returns (updated, skipped, parseError)
+-- Returns (updated, skipped, skipReasons)
 parseAndPersistUpdates :: EntityId -> [Document] -> Text -> App ([ProjectKnowledgeKind], [ProjectKnowledgeKind], Text)
 parseAndPersistUpdates projectId children respText = do
   -- Try to extract JSON from response (LLM might include markdown)
@@ -407,6 +407,16 @@ parseAndPersistUpdates projectId children respText = do
       -- Show specific parse error
       pure ([], [ProductResearch, Roadmap, Architecture, ActivityLog], "JSON parse error: " <> T.pack err)
     Right resp -> do
+      -- Log skip reasons for debugging
+      let skipReasons = catMaybes
+            [ fmap (\r -> "product_research: " <> r) (leftToMaybe $ lrRespProductResearch resp)
+            , fmap (\r -> "roadmap: " <> r) (leftToMaybe $ lrRespRoadmap resp)
+            , fmap (\r -> "architecture: " <> r) (leftToMaybe $ lrRespArchitecture resp)
+            , fmap (\r -> "activity_log: " <> r) (leftToMaybe $ lrRespActivityLog resp)
+            ]
+      liftIO $ forM_ skipReasons $ \reason ->
+        putStrLn $ "[Librarian] Skip reason: " <> T.unpack reason
+
       -- Process each document type
       prResult <- processUpdate projectId children ProductResearch (lrRespProductResearch resp)
       rmResult <- processUpdate projectId children Roadmap (lrRespRoadmap resp)
@@ -416,7 +426,13 @@ parseAndPersistUpdates projectId children respText = do
       let results = [(ProductResearch, prResult), (Roadmap, rmResult), (Architecture, arResult), (ActivityLog, alResult)]
       let updated = [k | (k, True) <- results]
       let skipped = [k | (k, False) <- results]
-      pure (updated, skipped, "")
+      let reasonsStr = T.intercalate "; " skipReasons
+      pure (updated, skipped, reasonsStr)
+
+-- | Extract Left value from Either
+leftToMaybe :: Either a b -> Maybe a
+leftToMaybe (Left a) = Just a
+leftToMaybe (Right _) = Nothing
 
 -- | Extract JSON from response (handles markdown code blocks)
 extractJson :: Text -> Text
