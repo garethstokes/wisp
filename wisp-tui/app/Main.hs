@@ -50,7 +50,7 @@ main = do
             , _csToolCalls = []
             }
         , _activitiesState = ActivitiesState [] 0 Nothing "" Nothing True False
-        , _knowledgeState = KnowledgeState NotesTab [] [] 0 Nothing
+        , _knowledgeState = KnowledgeState ProjectsTab [] [] [] 0 Nothing
         , _skillsState = SkillsState [] 0 Nothing
         , _agentsState = AgentsState [] 0 Nothing []
         , _approvalsState = ApprovalsState [] [] 0 Nothing
@@ -149,7 +149,8 @@ handleEvent _ (AppEvent (ActivitiesAppended acts hasMore)) = do
   modify $ activitiesState . asActivities %~ (++ acts)
   modify $ activitiesState . asHasMore .~ hasMore
   modify $ activitiesState . asLoading .~ False
-handleEvent _ (AppEvent (KnowledgeLoaded notes prefs)) = do
+handleEvent _ (AppEvent (KnowledgeLoaded projects notes prefs)) = do
+  modify $ knowledgeState . ksProjects .~ projects
   modify $ knowledgeState . ksNotes .~ notes
   modify $ knowledgeState . ksPrefs .~ prefs
   modify $ knowledgeState . ksSelected .~ 0
@@ -245,8 +246,8 @@ triggerDataLoad chan = do
         writeBChan chan (ActivitiesLoaded acts metrics hasMore)
       DL.ActivitiesAppended acts hasMore ->
         writeBChan chan (ActivitiesAppended acts hasMore)
-      DL.KnowledgeLoaded notes prefs ->
-        writeBChan chan (KnowledgeLoaded notes prefs)
+      DL.KnowledgeLoaded projects notes prefs ->
+        writeBChan chan (KnowledgeLoaded projects notes prefs)
       DL.SkillsLoaded skills ->
         writeBChan chan (SkillsLoaded skills)
       DL.AgentsLoaded agents ->

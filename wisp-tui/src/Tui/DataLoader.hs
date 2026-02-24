@@ -28,6 +28,7 @@ import Wisp.Client
   , ActivitiesResponse(..)
   , getActivities
   , getActivitiesPage
+  , getProjects
   , getNotes
   , getPreferences
   , getApprovals
@@ -43,7 +44,7 @@ import Wisp.Client
 data DataLoadResult
   = ActivitiesLoaded [Activity] (Maybe ActivityMetrics) Bool  -- activities, metrics, hasMore
   | ActivitiesAppended [Activity] Bool  -- more activities, hasMore
-  | KnowledgeLoaded [Document] [Document]  -- notes, prefs
+  | KnowledgeLoaded [Document] [Document] [Document]  -- projects, notes, prefs
   | SkillsLoaded [Skill]
   | AgentsLoaded [AgentInfo]
   | AgentSessionsLoaded Text [SessionSummary]
@@ -68,16 +69,18 @@ loadMoreActivities cfg offset = do
     Left err -> LoadError $ "Failed to load more activities: " <> showError err
     Right resp -> ActivitiesAppended (arActivities resp) (arHasMore resp)
 
--- | Load knowledge (notes, prefs) from server
+-- | Load knowledge (projects, notes, prefs) from server
 loadKnowledge :: ClientConfig -> IO DataLoadResult
 loadKnowledge cfg = do
+  projectsResult <- getProjects cfg
   notesResult <- getNotes cfg
   prefsResult <- getPreferences cfg
 
-  let notes = either (const []) id notesResult
+  let projects = either (const []) id projectsResult
+      notes = either (const []) id notesResult
       prefs = either (const []) id prefsResult
 
-  pure $ KnowledgeLoaded notes prefs
+  pure $ KnowledgeLoaded projects notes prefs
 
 -- | Load skills from server
 loadSkills :: ClientConfig -> IO DataLoadResult

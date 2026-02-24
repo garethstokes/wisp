@@ -41,6 +41,7 @@ module Tui.Types
   , asLoading
   -- Knowledge lenses
   , ksCurrentTab
+  , ksProjects
   , ksNotes
   , ksPrefs
   , ksSelected
@@ -92,7 +93,7 @@ data AppEvent
   = ChatEventReceived ChatEvent
   | ActivitiesLoaded [Activity] (Maybe ActivityMetrics) Bool  -- activities, metrics, hasMore
   | ActivitiesAppended [Activity] Bool  -- more activities, hasMore
-  | KnowledgeLoaded [Document] [Document]  -- notes, prefs
+  | KnowledgeLoaded [Document] [Document] [Document]  -- projects, notes, prefs
   | SkillsLoaded [Skill]
   | AgentsLoaded [AgentInfo]
   | AgentSessionsLoaded Text [SessionSummary]  -- agent name, sessions
@@ -112,7 +113,7 @@ data View = ChatView | ActivitiesView | KnowledgeView | SkillsView | AgentsView 
   deriving (Show, Eq, Ord, Enum, Bounded)
 
 -- | Knowledge sub-tabs
-data KnowledgeTab = NotesTab | PrefsTab
+data KnowledgeTab = ProjectsTab | NotesTab | PrefsTab
   deriving (Show, Eq, Ord, Enum, Bounded)
 
 -- | Chat message for display
@@ -151,6 +152,7 @@ makeLenses ''ActivitiesState
 -- | Knowledge view state (renamed from Documents)
 data KnowledgeState = KnowledgeState
   { _ksCurrentTab :: KnowledgeTab
+  , _ksProjects :: [Document]
   , _ksNotes :: [Document]
   , _ksPrefs :: [Document]
   , _ksSelected :: Int
