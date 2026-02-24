@@ -36,6 +36,7 @@ executable wisp-srv
         Skills.GitHub
         Skills.Housekeeper
         Skills.Insights
+        Skills.Librarian
         Skills.Reflection
         Skills.Registry
         Skills.Research
