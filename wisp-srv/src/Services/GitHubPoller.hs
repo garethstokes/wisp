@@ -2,12 +2,13 @@ module Services.GitHubPoller
   ( pollGitHubForAccount
   , pollAllGitHub
   , buildActivityFromEvent
+  , buildCommitActivity
   , backfillPushEventDiffs
   ) where
 
 import Control.Monad (forM)
 import Control.Monad.IO.Class (liftIO)
-import Data.Aeson (toJSON, Value(..))
+import Data.Aeson (toJSON, Value(..), object, (.=))
 import qualified Data.Aeson as Aeson
 import qualified Data.Aeson.KeyMap as KM
 import Data.Text (Text)
@@ -21,7 +22,8 @@ import qualified Domain.Activity as Activity
 import Infra.Db.Account (getAccountsByProvider)
 import Infra.Db.Activity (insertActivity, activityExistsForAccount, getActivitiesPaginated, updateActivityRaw)
 import Infra.Db.PollState (getPollStateForAccount, updatePollStateForAccount, ensurePollStateExists, PollState(..))
-import Infra.GitHub.Events (GitHubEvent(..), EventsResponse(..), listEvents, extractEventTitle)
+import Infra.GitHub.Events (GitHubEvent(..), EventsResponse(..), listEvents, extractEventTitle, CommitInfo(..))
+import Data.Time (UTCTime)
 import Infra.GitHub.Commits (fetchCompareDiff, PushDiff(..))
 
 -- | Build a NewActivity from a GitHubEvent
@@ -36,6 +38,40 @@ buildActivityFromEvent accId event = NewActivity
   , newActivityStartsAt = Just $ ghEventCreatedAt event
   , newActivityEndsAt = Nothing
   }
+
+-- | Build a child activity for an individual commit
+buildCommitActivity
+  :: EntityId      -- ^ Account ID
+  -> EntityId      -- ^ Parent PushEvent activity ID
+  -> Text          -- ^ Repository name (owner/repo)
+  -> CommitInfo    -- ^ Commit info
+  -> Maybe Text    -- ^ Diff content (if fetched successfully)
+  -> UTCTime       -- ^ Event timestamp
+  -> NewActivity
+buildCommitActivity accId _parentId repoName commit mDiff eventTime =
+  let -- Take first line of commit message for title
+      firstLine = T.takeWhile (/= '\n') (commitMessage commit)
+      title = "Commit to " <> repoName <> ": " <> T.take 80 firstLine
+
+      -- Build raw JSON with commit details
+      rawJson = object
+        [ "commit_sha" .= commitSha commit
+        , "commit_message" .= commitMessage commit
+        , "commit_author" .= commitAuthor commit
+        , "commit_url" .= commitUrl commit
+        , "repo" .= repoName
+        , "diff" .= mDiff
+        ]
+  in NewActivity
+    { newActivityAccountId = accId
+    , newActivitySource = Activity.GitHubEvent
+    , newActivitySourceId = commitSha commit  -- Use SHA as source_id
+    , newActivityRaw = rawJson
+    , newActivityTitle = Just title
+    , newActivitySenderEmail = Nothing
+    , newActivityStartsAt = Just eventTime
+    , newActivityEndsAt = Nothing
+    }
 
 -- | Enrich a PushEvent with the diff between before and head commits
 -- Uses GitHub's compare API to get the full diff
