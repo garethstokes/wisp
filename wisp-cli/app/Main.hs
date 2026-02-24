@@ -16,6 +16,7 @@ import Data.Text.IO qualified as TIO
 import Data.Time (UTCTime, getCurrentTime)
 import Data.Time.Format.ISO8601 (iso8601ParseM, iso8601Show)
 import Network.HTTP.Client
+import Network.HTTP.Types.Status (statusCode)
 import Options.Applicative
 import System.Directory (createDirectoryIfMissing, doesFileExist, getHomeDirectory, listDirectory, removeFile)
 import System.FilePath ((</>))
@@ -1182,7 +1183,9 @@ runLibrarian mProject = do
       initialReq <- parseRequest $ baseUrl <> "/api/projects/librarian/" <> unpack projectTag
       let req = initialReq{method = "POST"}
       response <- httpLbs req manager
-      case decode (responseBody response) of
+      let httpStatus = statusCode (responseStatus response)
+      let body = responseBody response
+      case decode body of
         Just (Object obj) -> do
           case KM.lookup "error" obj of
             Just (String err) -> TIO.putStrLn $ "Error: " <> err
@@ -1198,7 +1201,9 @@ runLibrarian mProject = do
                   Just r -> showLibrarianResult r
                   _ -> return ()
               _ -> TIO.putStrLn "Librarian request completed"
-        _ -> TIO.putStrLn "Librarian request sent"
+        _ -> do
+          TIO.putStrLn $ "HTTP Status: " <> showT httpStatus
+          TIO.putStrLn $ "Raw response: " <> decodeUtf8 (BL.toStrict body)
 
 showLibrarianResult :: Value -> IO ()
 showLibrarianResult (Object r) = do

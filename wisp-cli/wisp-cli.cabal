@@ -29,6 +29,7 @@ executable wisp
         filepath,
         http-client,
         http-client-tls,
+        http-types,
         optparse-applicative,
         process,
         time,
