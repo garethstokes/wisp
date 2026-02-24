@@ -12,6 +12,9 @@ module Infra.Db.Document
   , getProjectByTag
   , getAllProjects
   , updateProjectData
+  , getProjectChildren
+  , getLatestKnowledgeByKind
+  , insertWithSupersedes
   ) where
 
 import Control.Monad.IO.Class (liftIO)
@@ -34,6 +37,7 @@ instance ToField DocumentType where
   toField ProjectDoc = toField ("project" :: Text)
   toField NoteDoc = toField ("note" :: Text)
   toField PreferenceDoc = toField ("preference" :: Text)
+  toField ProjectKnowledgeDoc = toField ("project_knowledge" :: Text)
 
 instance ToField LogSource where
   toField LogAgent = toField ("agent" :: Text)
@@ -56,6 +60,7 @@ instance FromRow Document where
     <*> field                                   -- archived_at
     <*> (fmap EntityId <$> field)               -- supersedes_id
     <*> field                                   -- last_activity_at
+    <*> (fmap EntityId <$> field)               -- parent_id
     where
       typeField = fieldWith $ \f mbs -> do
         txt <- fromField f mbs :: Conversion Text
@@ -63,6 +68,7 @@ instance FromRow Document where
           "project" -> pure ProjectDoc
           "note" -> pure NoteDoc
           "preference" -> pure PreferenceDoc
+          "project_knowledge" -> pure ProjectKnowledgeDoc
           other -> returnError ConversionFailed f $ "Unknown document type: " <> T.unpack other
 
 -- FromRow for DocumentLogEntry
@@ -92,8 +98,8 @@ insertDocument new = do
   docId <- liftIO newEntityId
   let dataJson = LBS.toStrict $ encode (newDocData new)
   _ <- liftIO $ execute conn
-    "INSERT INTO documents (id, tenant_id, type, data, tags, confidence, source, supersedes_id) \
-    \VALUES (?, ?, ?, ?::jsonb, ?, ?, ?, ?)"
+    "INSERT INTO documents (id, tenant_id, type, data, tags, confidence, source, supersedes_id, parent_id) \
+    \VALUES (?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?)"
     ( unEntityId docId
     , fmap (\(TenantId u) -> u) (newDocTenantId new)
     , newDocType new
@@ -102,6 +108,7 @@ insertDocument new = do
     , newDocConfidence new
     , newDocSource new
     , fmap unEntityId (newDocSupersedesId new)
+    , fmap unEntityId (newDocParentId new)
     )
   pure docId
 
@@ -111,7 +118,7 @@ getDocumentById docId = do
   conn <- getConn
   results <- liftIO $ query conn
     "SELECT id, tenant_id, type, data, tags, confidence, source, active, \
-    \created_at, archived_at, supersedes_id, last_activity_at \
+    \created_at, archived_at, supersedes_id, last_activity_at, parent_id \
     \FROM documents WHERE id = ?"
     (Only $ unEntityId docId)
   pure $ case results of
@@ -125,14 +132,14 @@ getDocumentsByType docType activeOnly limit = do
   if activeOnly
     then liftIO $ query conn
       "SELECT id, tenant_id, type, data, tags, confidence, source, active, \
-      \created_at, archived_at, supersedes_id, last_activity_at \
+      \created_at, archived_at, supersedes_id, last_activity_at, parent_id \
       \FROM documents WHERE type = ? AND active = TRUE \
       \ORDER BY last_activity_at DESC NULLS LAST, created_at DESC \
       \LIMIT ?"
       (docType, limit)
     else liftIO $ query conn
       "SELECT id, tenant_id, type, data, tags, confidence, source, active, \
-      \created_at, archived_at, supersedes_id, last_activity_at \
+      \created_at, archived_at, supersedes_id, last_activity_at, parent_id \
       \FROM documents WHERE type = ? \
       \ORDER BY created_at DESC \
       \LIMIT ?"
@@ -145,14 +152,14 @@ getDocumentsByTags tags activeOnly limit = do
   if activeOnly
     then liftIO $ query conn
       "SELECT id, tenant_id, type, data, tags, confidence, source, active, \
-      \created_at, archived_at, supersedes_id, last_activity_at \
+      \created_at, archived_at, supersedes_id, last_activity_at, parent_id \
       \FROM documents WHERE tags && ? AND active = TRUE \
       \ORDER BY last_activity_at DESC NULLS LAST, created_at DESC \
       \LIMIT ?"
       (PGArray tags, limit)
     else liftIO $ query conn
       "SELECT id, tenant_id, type, data, tags, confidence, source, active, \
-      \created_at, archived_at, supersedes_id, last_activity_at \
+      \created_at, archived_at, supersedes_id, last_activity_at, parent_id \
       \FROM documents WHERE tags && ? \
       \ORDER BY created_at DESC \
       \LIMIT ?"
@@ -164,7 +171,7 @@ getActiveDocuments limit = do
   conn <- getConn
   liftIO $ query conn
     "SELECT id, tenant_id, type, data, tags, confidence, source, active, \
-    \created_at, archived_at, supersedes_id, last_activity_at \
+    \created_at, archived_at, supersedes_id, last_activity_at, parent_id \
     \FROM documents WHERE active = TRUE AND supersedes_id IS NULL \
     \ORDER BY last_activity_at DESC NULLS LAST, created_at DESC \
     \LIMIT ?"
@@ -224,7 +231,7 @@ getProjectByTag tag = do
   conn <- getConn
   results <- liftIO $ query conn
     "SELECT id, tenant_id, type, data, tags, confidence, source, active, \
-    \created_at, archived_at, supersedes_id, last_activity_at \
+    \created_at, archived_at, supersedes_id, last_activity_at, parent_id \
     \FROM documents \
     \WHERE type = 'project' AND active = TRUE AND ? = ANY(tags) \
     \LIMIT 1"
@@ -239,7 +246,7 @@ getAllProjects = do
   conn <- getConn
   liftIO $ query_ conn
     "SELECT id, tenant_id, type, data, tags, confidence, source, active, \
-    \created_at, archived_at, supersedes_id, last_activity_at \
+    \created_at, archived_at, supersedes_id, last_activity_at, parent_id \
     \FROM documents \
     \WHERE type = 'project' AND active = TRUE \
     \ORDER BY last_activity_at DESC NULLS LAST, created_at DESC"
@@ -253,3 +260,42 @@ updateProjectData docId newData = do
     "UPDATE documents SET data = ?::jsonb, last_activity_at = now() WHERE id = ?"
     (dataJson, unEntityId docId)
   pure ()
+
+-- | Get all child documents for a project
+getProjectChildren :: EntityId -> App [Document]
+getProjectChildren parentId = do
+  conn <- getConn
+  liftIO $ query conn
+    "SELECT id, tenant_id, type, data, tags, confidence, source, active, \
+    \created_at, archived_at, supersedes_id, last_activity_at, parent_id \
+    \FROM documents \
+    \WHERE parent_id = ? AND active = TRUE \
+    \ORDER BY created_at DESC"
+    (Only $ unEntityId parentId)
+
+-- | Get latest version of a specific knowledge kind for a project
+-- The 'kind' is stored in the data->>'kind' field of project_knowledge documents
+getLatestKnowledgeByKind :: EntityId -> Text -> App (Maybe Document)
+getLatestKnowledgeByKind parentId kind = do
+  conn <- getConn
+  results <- liftIO $ query conn
+    "SELECT id, tenant_id, type, data, tags, confidence, source, active, \
+    \created_at, archived_at, supersedes_id, last_activity_at, parent_id \
+    \FROM documents \
+    \WHERE parent_id = ? AND type = 'project_knowledge' AND active = TRUE \
+    \AND data->>'kind' = ? \
+    \ORDER BY created_at DESC \
+    \LIMIT 1"
+    (unEntityId parentId, kind)
+  pure $ case results of
+    [doc] -> Just doc
+    _ -> Nothing
+
+-- | Insert document that supersedes another (deactivates old, inserts new)
+insertWithSupersedes :: NewDocument -> EntityId -> App EntityId
+insertWithSupersedes new oldDocId = do
+  -- Deactivate the old document
+  archiveDocument oldDocId
+  -- Insert the new document with supersedes_id pointing to old
+  let newWithSupersedes = new { newDocSupersedesId = Just oldDocId }
+  insertDocument newWithSupersedes

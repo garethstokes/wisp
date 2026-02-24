@@ -55,6 +55,7 @@ summarizeSession session = do
         , newDocConfidence = Just 0.8
         , newDocSource = Just "summarizer"
         , newDocSupersedesId = Nothing
+        , newDocParentId = Nothing
         }
       -- Mark session as summarized
       markSummarized (sessionId session)

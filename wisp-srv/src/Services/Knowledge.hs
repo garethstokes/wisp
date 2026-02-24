@@ -119,5 +119,6 @@ captureNote tenantId noteContent mAgentId = do
         , newDocConfidence = Just 0.9
         , newDocSource = mAgentId
         , newDocSupersedesId = Nothing
+        , newDocParentId = Nothing
         }
   insertDocument newDoc

@@ -107,6 +107,7 @@ postProject = do
         , newDocConfidence = Nothing
         , newDocSource = Just "user"
         , newDocSupersedesId = Nothing
+        , newDocParentId = Nothing
         }
   docId <- lift $ Db.insertDocument newDoc
   let logEntry = NewDocumentLogEntry
@@ -192,6 +193,7 @@ postNote = do
         , newDocConfidence = Nothing
         , newDocSource = Just "user"
         , newDocSupersedesId = Nothing
+        , newDocParentId = Nothing
         }
   docId <- lift $ Db.insertDocument newDoc
   let logEntry = NewDocumentLogEntry
@@ -232,6 +234,7 @@ postPref = do
         , newDocConfidence = Nothing
         , newDocSource = Just "user"
         , newDocSupersedesId = Nothing
+        , newDocParentId = Nothing
         }
   docId <- lift $ Db.insertDocument newDoc
   let logEntry = NewDocumentLogEntry

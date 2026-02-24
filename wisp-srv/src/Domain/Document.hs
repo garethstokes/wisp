@@ -41,19 +41,21 @@ instance FromJSON ProjectType where
     other -> fail $ "Unknown project type: " <> show other
 
 -- Document type discriminator
-data DocumentType = ProjectDoc | NoteDoc | PreferenceDoc
+data DocumentType = ProjectDoc | NoteDoc | PreferenceDoc | ProjectKnowledgeDoc
   deriving (Eq, Show, Generic)
 
 instance ToJSON DocumentType where
   toJSON ProjectDoc = "project"
   toJSON NoteDoc = "note"
   toJSON PreferenceDoc = "preference"
+  toJSON ProjectKnowledgeDoc = "project_knowledge"
 
 instance FromJSON DocumentType where
   parseJSON = withText "DocumentType" $ \case
     "project" -> pure ProjectDoc
     "note" -> pure NoteDoc
     "preference" -> pure PreferenceDoc
+    "project_knowledge" -> pure ProjectKnowledgeDoc
     other -> fail $ "Unknown document type: " <> show other
 
 -- Type-specific data
@@ -140,6 +142,7 @@ data Document = Document
   , documentArchivedAt :: Maybe UTCTime
   , documentSupersedesId :: Maybe EntityId
   , documentLastActivityAt :: Maybe UTCTime
+  , documentParentId :: Maybe EntityId
   } deriving (Eq, Show)
 
 instance ToJSON Document where
@@ -156,6 +159,7 @@ instance ToJSON Document where
     , "archived_at" .= documentArchivedAt d
     , "supersedes_id" .= fmap unEntityId (documentSupersedesId d)
     , "last_activity_at" .= documentLastActivityAt d
+    , "parent_id" .= fmap unEntityId (documentParentId d)
     ]
 
 -- For creating new documents
@@ -167,6 +171,7 @@ data NewDocument = NewDocument
   , newDocConfidence :: Maybe Double
   , newDocSource :: Maybe Text
   , newDocSupersedesId :: Maybe EntityId
+  , newDocParentId :: Maybe EntityId
   } deriving (Eq, Show)
 
 -- Log entry source
