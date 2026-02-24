@@ -237,6 +237,7 @@ test-suite wisp-srv-test
         Infra.Db.AccountSpec
         Infra.Db.Activity
         Infra.Db.ActivitySpec
+        Infra.Db.ActivityParentSpec
         Infra.Db.Auth
         Infra.Db.Migrations
         Infra.Db.MigrationsSpec

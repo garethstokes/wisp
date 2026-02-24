@@ -1,6 +1,7 @@
 -- src/Infra/Db/Activity.hs
 module Infra.Db.Activity
   ( insertActivity
+  , insertActivityWithParent
   , insertConversation
   , insertNote
   , activityExists
@@ -126,6 +127,32 @@ insertActivity new = do
     , newActivitySenderEmail new
     , newActivityStartsAt new
     , newActivityEndsAt new
+    )
+  pure $ if n > 0 then Just aid else Nothing
+
+-- | Insert a new activity with optional parent_id (for child activities)
+insertActivityWithParent :: NewActivity -> Maybe EntityId -> App (Maybe EntityId)
+insertActivityWithParent new mParentId = do
+  conn <- getConn
+  aid <- liftIO newEntityId
+  let srcText = sourceToText (newActivitySource new)
+  mTenantId <- getTenantIdForAccount (newActivityAccountId new)
+  n <- liftIO $ execute conn
+    "insert into activities \
+    \(id, account_id, tenant_id, source, source_id, raw, title, sender_email, starts_at, ends_at, parent_id) \
+    \values (?, ?, ?::uuid, ?, ?, ?, ?, ?, ?, ?, ?) \
+    \on conflict (account_id, source, source_id) do nothing"
+    ( unEntityId aid
+    , unEntityId (newActivityAccountId new)
+    , mTenantId
+    , srcText
+    , newActivitySourceId new
+    , newActivityRaw new
+    , newActivityTitle new
+    , newActivitySenderEmail new
+    , newActivityStartsAt new
+    , newActivityEndsAt new
+    , fmap unEntityId mParentId
     )
   pure $ if n > 0 then Just aid else Nothing
 
