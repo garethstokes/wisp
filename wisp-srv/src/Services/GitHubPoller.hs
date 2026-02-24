@@ -7,7 +7,7 @@ module Services.GitHubPoller
   , backfillPushEventDiffs
   ) where
 
-import Control.Monad (forM)
+import Control.Monad (forM, forM_, void)
 import Control.Monad.IO.Class (liftIO)
 import Data.Aeson (toJSON, Value(..), object, (.=))
 import qualified Data.Aeson as Aeson
@@ -21,11 +21,11 @@ import Domain.Account (Account(..), AccountProvider(..), accountIdentifier)
 import Domain.Activity (NewActivity(..))
 import qualified Domain.Activity as Activity
 import Infra.Db.Account (getAccountsByProvider)
-import Infra.Db.Activity (insertActivity, activityExistsForAccount, getActivitiesPaginated, updateActivityRaw)
+import Infra.Db.Activity (insertActivity, insertActivityWithParent, activityExistsForAccount, getActivitiesPaginated, updateActivityRaw)
 import Infra.Db.PollState (getPollStateForAccount, updatePollStateForAccount, ensurePollStateExists, PollState(..))
-import Infra.GitHub.Events (GitHubEvent(..), EventsResponse(..), listEvents, extractEventTitle, CommitInfo(..))
+import Infra.GitHub.Events (GitHubEvent(..), EventsResponse(..), listEvents, extractEventTitle, CommitInfo(..), extractCommitsFromPayload)
 import Data.Time (UTCTime)
-import Infra.GitHub.Commits (fetchCompareDiff, PushDiff(..))
+import Infra.GitHub.Commits (fetchCommitDiff, fetchCompareDiff, PushDiff(..))
 
 -- | Build a NewActivity from a GitHubEvent
 buildActivityFromEvent :: EntityId -> GitHubEvent -> NewActivity
@@ -186,16 +186,51 @@ pollGitHubForAccount acc = do
 -- | Process a list of events, inserting as activities
 processEvents :: EntityId -> Text -> [GitHubEvent] -> App [EntityId]
 processEvents accId accessToken events = do
-  results <- forM events $ \event -> do
-    exists <- activityExistsForAccount accId Activity.GitHubEvent (ghEventId event)
-    if exists
-      then pure Nothing
-      else do
-        -- Enrich PushEvents with commit diffs
-        enrichedEvent <- liftIO $ enrichPushEventWithDiffs accessToken event
-        let activity = buildActivityFromEvent accId enrichedEvent
-        insertActivity activity
+  results <- forM events $ \event ->
+    if ghEventType event == "PushEvent"
+      then processPushEvent accId accessToken event
+      else processOtherEvent accId accessToken event
   pure [aid | Just aid <- results]
+
+-- | Process a PushEvent: create parent activity + child activities for each commit
+processPushEvent :: EntityId -> Text -> GitHubEvent -> App (Maybe EntityId)
+processPushEvent accId accessToken event = do
+  -- Check if we already have this event
+  exists <- activityExistsForAccount accId Activity.GitHubEvent (ghEventId event)
+  if exists
+    then pure Nothing
+    else do
+      -- 1. Insert parent PushEvent (no diff)
+      let parentActivity = buildPushEventParent accId event
+      mParentId <- insertActivity parentActivity
+
+      case mParentId of
+        Nothing -> pure Nothing  -- duplicate (race condition)
+        Just parentId -> do
+          -- 2. Extract commits from payload
+          let commits = extractCommitsFromPayload (ghEventPayload event)
+              (owner, repo) = splitRepoName (ghEventRepo event)
+
+          -- 3. Create child activity for each commit (fetch individual diffs)
+          forM_ commits $ \commit -> do
+            mDiff <- liftIO $ fetchCommitDiff owner repo (commitSha commit) accessToken
+            let diff = either (const Nothing) Just mDiff
+                childActivity = buildCommitActivity accId parentId (ghEventRepo event) commit diff (ghEventCreatedAt event)
+            void $ insertActivityWithParent childActivity (Just parentId)
+
+          pure (Just parentId)
+
+-- | Process non-PushEvent events (existing logic)
+processOtherEvent :: EntityId -> Text -> GitHubEvent -> App (Maybe EntityId)
+processOtherEvent accId accessToken event = do
+  exists <- activityExistsForAccount accId Activity.GitHubEvent (ghEventId event)
+  if exists
+    then pure Nothing
+    else do
+      -- Enrich PushEvents with commit diffs (legacy - won't be called for PushEvents now)
+      enrichedEvent <- liftIO $ enrichPushEventWithDiffs accessToken event
+      let activity = buildActivityFromEvent accId enrichedEvent
+      insertActivity activity
 
 -- | Backfill diffs for existing PushEvent activities
 backfillPushEventDiffs :: App Text
