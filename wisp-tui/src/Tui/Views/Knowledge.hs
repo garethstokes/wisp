@@ -272,19 +272,27 @@ handleListEventWithAction (V.EvKey (V.KChar '2') []) = do
 handleListEventWithAction (V.EvKey (V.KChar '3') []) = do
   modify $ knowledgeState . ksCurrentTab .~ PrefsTab
   pure KnowledgeNoAction
-handleListEventWithAction (V.EvKey (V.KChar 'j') []) = do
+handleListEventWithAction (V.EvKey (V.KChar 'j') []) = listMoveDown
+handleListEventWithAction (V.EvKey V.KDown []) = listMoveDown
+handleListEventWithAction (V.EvKey (V.KChar 'k') []) = listMoveUp
+handleListEventWithAction (V.EvKey V.KUp []) = listMoveUp
+handleListEventWithAction (V.EvKey V.KEnter []) = expandProjectWithAction
+handleListEventWithAction (V.EvKey (V.KChar 'l') []) = expandProjectWithAction
+handleListEventWithAction evt = do
+  _ <- handleViewportScroll KnowledgeList evt
+  pure KnowledgeNoAction
+
+listMoveDown :: EventM Name AppState KnowledgeAction
+listMoveDown = do
   s <- get
   let docs = currentDocs' (s ^. knowledgeState)
       maxIdx = length docs - 1
   modify $ knowledgeState . ksSelected %~ (\i -> min (i + 1) (max 0 maxIdx))
   pure KnowledgeNoAction
-handleListEventWithAction (V.EvKey (V.KChar 'k') []) = do
+
+listMoveUp :: EventM Name AppState KnowledgeAction
+listMoveUp = do
   modify $ knowledgeState . ksSelected %~ (\i -> max 0 (i - 1))
-  pure KnowledgeNoAction
-handleListEventWithAction (V.EvKey V.KEnter []) = expandProjectWithAction
-handleListEventWithAction (V.EvKey (V.KChar 'l') []) = expandProjectWithAction
-handleListEventWithAction evt = do
-  _ <- handleViewportScroll KnowledgeList evt
   pure KnowledgeNoAction
 
 -- | Expand a project and return action to load children if it's a project
