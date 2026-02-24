@@ -8,7 +8,6 @@ module Skills.Librarian
 
 import Control.Monad (forM, when)
 import Control.Monad.IO.Class (liftIO)
-import qualified Data.ByteString.Lazy.Char8 as LBS
 import Data.Aeson (Result(..), FromJSON(..), ToJSON(..), Value(..), decode, fromJSON, toJSON, withObject, (.:?))
 import Data.Aeson.Types (Parser)
 import qualified Data.Aeson.Key as Key
@@ -261,18 +260,31 @@ buildLibrarianPrompt projData activities children mGithubData = T.unlines
         , ""
         ]
   , "## Instructions"
-  , "Based on the new activities and any GitHub commits, determine which knowledge documents need updates."
-  , "For each document type, either provide updated content or indicate no change needed."
+  , "Your task is to CREATE or UPDATE project knowledge documents based on the activities above."
+  , ""
+  , "IMPORTANT RULES:"
+  , "1. If a document shows '(Not yet created)', you MUST CREATE it by providing complete content."
+  , "2. If a document exists but the activities contain relevant new information, UPDATE it."
+  , "3. Only use \"no_change\" if a document already exists AND no new activities are relevant to it."
+  , "4. You have " <> T.pack (show (length activities)) <> " activities to process - there IS useful information here."
+  , ""
+  , "For this project, synthesize the activities into knowledge documents. Extract:"
+  , "- Product Research: vision, value proposition, key people/contacts mentioned, open questions"
+  , "- Roadmap: milestones, timeline, goals mentioned in activities"
+  , "- Architecture: technical decisions, code patterns, infrastructure mentioned"
+  , "- Activity Log: summary of what happened, key highlights"
   , ""
   , "Respond with ONLY a JSON object with this structure:"
   , "{"
-  , "  \"product_research\": { ... updated data ... } | \"no_change\","
-  , "  \"roadmap\": { ... updated data ... } | \"no_change\","
-  , "  \"architecture\": { ... updated data ... } | \"no_change\","
-  , "  \"activity_log\": { ... updated data ... } | \"no_change\""
+  , "  \"product_research\": { ... document data ... } | \"no_change\","
+  , "  \"roadmap\": { ... document data ... } | \"no_change\","
+  , "  \"architecture\": { ... document data ... } | \"no_change\","
+  , "  \"activity_log\": { ... document data ... } | \"no_change\""
   , "}"
   , ""
-  , "For each document type that needs updating, include all fields:"
+  , "REMEMBER: Documents marked '(Not yet created)' MUST have content provided, not \"no_change\"."
+  , ""
+  , "For each document type, include all fields:"
   , ""
   , "product_research: { \"vision\": \"...\", \"value_proposition\": \"...\", \"key_contacts\": [...], \"open_questions\": [...] }"
   , "roadmap: { \"milestones\": [...], \"timeline_notes\": \"...\" }"
@@ -341,7 +353,19 @@ formatActivity :: Activity -> Text
 formatActivity act =
   let title = fromMaybe "(no title)" (activityTitle act)
       summary = fromMaybe "" (activitySummary act)
-  in "- " <> title <> (if T.null summary then "" else ": " <> T.take 100 summary)
+      source = T.pack $ show $ activitySource act
+      sender = fromMaybe "" (activitySenderEmail act)
+      actType = fromMaybe "" (activityType act)
+      tags = activityTags act
+      -- Build metadata parts
+      metaParts = filter (not . T.null)
+        [ if T.null sender then "" else "from: " <> sender
+        , if T.null actType then "" else "type: " <> actType
+        , if null tags then "" else "tags: " <> T.intercalate ", " tags
+        ]
+      metaStr = if null metaParts then "" else " [" <> T.intercalate "; " metaParts <> "]"
+      summaryStr = if T.null summary then "" else "\n    " <> T.take 200 summary
+  in "- [" <> source <> "] " <> title <> metaStr <> summaryStr
 
 --------------------------------------------------------------------------------
 -- Response Parsing and Persistence
