@@ -20,6 +20,7 @@ spec = around withTestEnv $ do
             , newDocConfidence = Just 1.0
             , newDocSource = Just "user"
             , newDocSupersedesId = Nothing
+            , newDocParentId = Nothing
             }
       docId <- insertDocument newDoc
 
@@ -41,6 +42,7 @@ spec = around withTestEnv $ do
             , newDocConfidence = Just 1.0
             , newDocSource = Just "user"
             , newDocSupersedesId = Nothing
+            , newDocParentId = Nothing
             }
       docId <- insertDocument newDoc
       archiveDocument docId
@@ -59,6 +61,7 @@ spec = around withTestEnv $ do
             , newDocConfidence = Just 1.0
             , newDocSource = Just "user"
             , newDocSupersedesId = Nothing
+            , newDocParentId = Nothing
             }
       _ <- insertDocument newDoc
 
@@ -74,6 +77,7 @@ spec = around withTestEnv $ do
             , newDocConfidence = Just 1.0
             , newDocSource = Just "user"
             , newDocSupersedesId = Nothing
+            , newDocParentId = Nothing
             }
       docId <- insertDocument newDoc
       archiveDocument docId
@@ -91,6 +95,7 @@ spec = around withTestEnv $ do
             , newDocConfidence = Just 1.0
             , newDocSource = Just "user"
             , newDocSupersedesId = Nothing
+            , newDocParentId = Nothing
             }
       docId <- insertDocument newDoc
 

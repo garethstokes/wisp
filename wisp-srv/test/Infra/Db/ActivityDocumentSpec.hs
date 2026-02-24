@@ -42,6 +42,7 @@ spec = around withTestEnv $ do
                 , newDocConfidence = Just 1.0
                 , newDocSource = Just "user"
                 , newDocSupersedesId = Nothing
+                , newDocParentId = Nothing
                 }
           docId <- insertDocument newDoc
 
@@ -85,6 +86,7 @@ spec = around withTestEnv $ do
                 , newDocConfidence = Nothing
                 , newDocSource = Nothing
                 , newDocSupersedesId = Nothing
+                , newDocParentId = Nothing
                 }
           docId1 <- insertDocument doc1
 
@@ -96,6 +98,7 @@ spec = around withTestEnv $ do
                 , newDocConfidence = Nothing
                 , newDocSource = Nothing
                 , newDocSupersedesId = Nothing
+                , newDocParentId = Nothing
                 }
           docId2 <- insertDocument doc2
 
@@ -130,6 +133,7 @@ spec = around withTestEnv $ do
                 , newDocConfidence = Nothing
                 , newDocSource = Nothing
                 , newDocSupersedesId = Nothing
+                , newDocParentId = Nothing
                 }
           docId <- insertDocument newDoc
 

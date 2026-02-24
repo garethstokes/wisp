@@ -28,7 +28,7 @@ spec = around withTestEnv $ do
             , "participants" .= ([] :: [String])
             , "activity_count" .= (0 :: Int)
             ]
-      let newDoc = NewDocument Nothing ProjectDoc projData ["wisp"] (Just 1.0) (Just "user") Nothing
+      let newDoc = NewDocument Nothing ProjectDoc projData ["wisp"] (Just 1.0) (Just "user") Nothing Nothing
       docId <- Infra.Db.Document.insertDocument newDoc
 
       -- Create activity
@@ -66,7 +66,7 @@ spec = around withTestEnv $ do
             , "participants" .= (["bob@example.com"] :: [String])
             , "activity_count" .= (5 :: Int)
             ]
-      let newDoc = NewDocument Nothing ProjectDoc projData ["wisp"] (Just 1.0) (Just "user") Nothing
+      let newDoc = NewDocument Nothing ProjectDoc projData ["wisp"] (Just 1.0) (Just "user") Nothing Nothing
       docId <- Infra.Db.Document.insertDocument newDoc
 
       -- Create activity
@@ -105,7 +105,7 @@ spec = around withTestEnv $ do
             , "activity_count" .= (0 :: Int)
             , "participants" .= ([] :: [String])
             ]
-      let newDoc = NewDocument Nothing ProjectDoc projData ["lune"] (Just 1.0) (Just "user") Nothing
+      let newDoc = NewDocument Nothing ProjectDoc projData ["lune"] (Just 1.0) (Just "user") Nothing Nothing
       _ <- Infra.Db.Document.insertDocument newDoc
 
       -- Create activity
