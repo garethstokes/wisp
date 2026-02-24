@@ -3,6 +3,7 @@ module Services.GitHubPoller
   , pollAllGitHub
   , buildActivityFromEvent
   , buildCommitActivity
+  , buildPushEventParent
   , backfillPushEventDiffs
   ) where
 
@@ -70,6 +71,26 @@ buildCommitActivity accId _parentId repoName commit mDiff eventTime =
     , newActivityTitle = Just title
     , newActivitySenderEmail = Nothing
     , newActivityStartsAt = Just eventTime
+    , newActivityEndsAt = Nothing
+    }
+
+-- | Build a parent activity for a PushEvent (metadata only, no diff)
+-- The payload is stripped of the push_diff field to keep it small
+buildPushEventParent :: EntityId -> GitHubEvent -> NewActivity
+buildPushEventParent accId event =
+  let -- Strip any existing push_diff from payload (keep just metadata)
+      strippedPayload = case ghEventPayload event of
+        Object obj -> Object $ KM.delete "push_diff" obj
+        other -> other
+      eventWithoutDiff = event { ghEventPayload = strippedPayload }
+  in NewActivity
+    { newActivityAccountId = accId
+    , newActivitySource = Activity.GitHubEvent
+    , newActivitySourceId = ghEventId event
+    , newActivityRaw = toJSON eventWithoutDiff
+    , newActivityTitle = Just $ extractEventTitle event
+    , newActivitySenderEmail = Nothing
+    , newActivityStartsAt = Just $ ghEventCreatedAt event
     , newActivityEndsAt = Nothing
     }
 

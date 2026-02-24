@@ -1,13 +1,13 @@
 module Services.GitHubPollerSpec where
 
 import Test.Hspec
-import Services.GitHubPoller (buildActivityFromEvent, buildCommitActivity)
+import Services.GitHubPoller (buildActivityFromEvent, buildCommitActivity, buildPushEventParent)
 import Infra.GitHub.Events (CommitInfo(..))
 import qualified Infra.GitHub.Events as GH
 import qualified Domain.Activity as Activity
 import Domain.Activity (NewActivity(..))
 import Domain.Id (EntityId(..))
-import Data.Aeson (object)
+import Data.Aeson (object, (.=), Value)
 import Data.Time.Clock.POSIX (posixSecondsToUTCTime)
 
 spec :: Spec
@@ -50,3 +50,27 @@ spec = describe "GitHubPoller" $ do
       newActivitySource activity `shouldBe` Activity.GitHubEvent
       newActivitySourceId activity `shouldBe` "abc123def456"
       newActivityTitle activity `shouldBe` Just "Commit to owner/repo: feat: add cool feature"
+
+  describe "buildPushEventParent" $ do
+    it "creates parent PushEvent activity without diff" $ do
+      let testTime = posixSecondsToUTCTime 1704067200
+          payload = object
+            [ "before" .= ("abc123" :: String)
+            , "head" .= ("def456" :: String)
+            , "commits" .= ([] :: [Value])
+            ]
+          event = GH.GitHubEvent
+            { GH.ghEventId = "push-event-12345"
+            , GH.ghEventType = "PushEvent"
+            , GH.ghEventActor = "garethstokes"
+            , GH.ghEventRepo = "owner/repo"
+            , GH.ghEventPayload = payload
+            , GH.ghEventCreatedAt = testTime
+            }
+          accountId = EntityId "acc123"
+
+      let activity = buildPushEventParent accountId event
+
+      newActivitySource activity `shouldBe` Activity.GitHubEvent
+      newActivitySourceId activity `shouldBe` "push-event-12345"
+      newActivityTitle activity `shouldBe` Just "PushEvent to owner/repo"
