@@ -161,7 +161,7 @@ projectChildrenSection doc children
       , withAttr (attrName "mdHeader") $ txt "Knowledge Documents"
       ] ++ map renderKnowledgeChild children
 
--- | Render a knowledge document child
+-- | Render a knowledge document child with full content
 renderKnowledgeChild :: Document -> Widget Name
 renderKnowledgeChild doc =
   let kind = extractField "kind" (documentData doc)
@@ -171,14 +171,58 @@ renderKnowledgeChild doc =
         "architecture" -> "Architecture"
         "activity_log" -> "Activity Log"
         _ -> kind
-      summary = extractField "summary" (documentData doc)
-      shortSummary = if T.length summary > 80
-                     then T.take 77 summary <> "..."
-                     else summary
-  in vBox
-    [ txt $ "  " <> kindLabel <> ":"
-    , txt $ "    " <> (if T.null shortSummary then "(no summary)" else shortSummary)
-    ]
+      content = renderKnowledgeContent kind (documentData doc)
+  in vBox $
+    [ txt ""
+    , withAttr (attrName "mdBold") $ txt $ "  " <> kindLabel
+    ] ++ map (\w -> padLeft (Pad 4) w) content
+
+-- | Render content based on knowledge document kind
+renderKnowledgeContent :: T.Text -> Value -> [Widget Name]
+renderKnowledgeContent "product_research" (Object obj) =
+  let vision = extractFromObj "vision" obj
+      valueProp = extractFromObj "value_proposition" obj
+  in [ renderLabeledField "Vision" vision
+     , renderLabeledField "Value Proposition" valueProp
+     ]
+renderKnowledgeContent "roadmap" (Object obj) =
+  let timelineNotes = extractFromObj "timeline_notes" obj
+  in [ renderLabeledField "Timeline" timelineNotes
+     ]
+renderKnowledgeContent "architecture" (Object obj) =
+  let usersPersonas = extractFromObj "users_personas" obj
+      testing = extractFromObj "testing" obj
+      codeStructure = extractFromObj "code_structure" obj
+      dataStructure = extractFromObj "data_structure" obj
+      infrastructure = extractFromObj "infrastructure" obj
+  in [ renderLabeledField "Users/Personas" usersPersonas
+     , renderLabeledField "Testing" testing
+     , renderLabeledField "Code Structure" codeStructure
+     , renderLabeledField "Data Structure" dataStructure
+     , renderLabeledField "Infrastructure" infrastructure
+     ]
+renderKnowledgeContent "activity_log" (Object obj) =
+  let period = extractFromObj "period" obj
+      summary = extractFromObj "summary" obj
+  in [ renderLabeledField "Period" period
+     , renderLabeledField "Summary" summary
+     ]
+renderKnowledgeContent _ _ = [txt "(unknown format)"]
+
+-- | Extract text from object
+extractFromObj :: T.Text -> KM.KeyMap Value -> T.Text
+extractFromObj key obj = case KM.lookup (fromString $ T.unpack key) obj of
+  Just (String s) -> s
+  _ -> ""
+
+-- | Render a labeled field with word wrapping
+renderLabeledField :: T.Text -> T.Text -> Widget Name
+renderLabeledField label value
+  | T.null value = emptyWidget
+  | otherwise = vBox
+      [ withAttr (attrName "dim") $ txt $ label <> ":"
+      , txtWrap value
+      ]
 
 renderField :: (KM.Key, Value) -> Widget Name
 renderField (key, val) =
