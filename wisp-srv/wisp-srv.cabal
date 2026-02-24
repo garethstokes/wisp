@@ -283,6 +283,7 @@ test-suite wisp-srv-test
         Services.CalendarPoller
         Services.CalendarPollerSpec
         Services.GitHubPoller
+        Services.GitHubPollerIntegrationSpec
         Services.GitHubPollerSpec
         Services.GmailPoller
         Services.GmailPollerSpec
