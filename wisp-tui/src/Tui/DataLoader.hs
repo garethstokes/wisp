@@ -2,6 +2,7 @@ module Tui.DataLoader
   ( loadActivities
   , loadMoreActivities
   , loadKnowledge
+  , loadProjectChildren
   , loadSkills
   , loadAgents
   , loadAgentSessions
@@ -39,12 +40,14 @@ import Wisp.Client
   , getAgentSessions
   , getActiveSession
   )
+import qualified Wisp.Client as WC
 
 -- | Result of a data load operation
 data DataLoadResult
   = ActivitiesLoaded [Activity] (Maybe ActivityMetrics) Bool  -- activities, metrics, hasMore
   | ActivitiesAppended [Activity] Bool  -- more activities, hasMore
   | KnowledgeLoaded [Document] [Document] [Document]  -- projects, notes, prefs
+  | ProjectChildrenLoaded [Document]  -- children of a project
   | SkillsLoaded [Skill]
   | AgentsLoaded [AgentInfo]
   | AgentSessionsLoaded Text [SessionSummary]
@@ -81,6 +84,14 @@ loadKnowledge cfg = do
       prefs = either (const []) id prefsResult
 
   pure $ KnowledgeLoaded projects notes prefs
+
+-- | Load children of a project (knowledge documents)
+loadProjectChildren :: ClientConfig -> Text -> IO DataLoadResult
+loadProjectChildren cfg projectId = do
+  result <- WC.getProjectChildren cfg projectId
+  pure $ case result of
+    Left err -> LoadError $ "Failed to load project children: " <> showError err
+    Right children -> ProjectChildrenLoaded children
 
 -- | Load skills from server
 loadSkills :: ClientConfig -> IO DataLoadResult

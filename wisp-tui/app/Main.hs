@@ -20,7 +20,7 @@ import Tui.Views.Activities (activitiesWidget, handleActivitiesEvent, handleActi
 import Tui.Views.Agents (agentsWidget, handleAgentsEvent)
 import Tui.Views.Approvals (approvalsWidget, handleApprovalsEvent)
 import Tui.Views.Chat (chatWidget, handleChatEvent, sendChatMessage)
-import Tui.Views.Knowledge (knowledgeWidget, handleKnowledgeEvent)
+import Tui.Views.Knowledge (knowledgeWidget, handleKnowledgeEventWithAction, KnowledgeAction(..))
 import Tui.Views.Skills (skillsWidget, handleSkillsEvent)
 import Tui.Widgets.Layout (headerWidget, statusBarWidget)
 import Wisp.Client (defaultConfig, AgentInfo(..))
@@ -50,7 +50,7 @@ main = do
             , _csToolCalls = []
             }
         , _activitiesState = ActivitiesState [] 0 Nothing "" Nothing True False
-        , _knowledgeState = KnowledgeState ProjectsTab [] [] [] 0 Nothing
+        , _knowledgeState = KnowledgeState ProjectsTab [] [] [] 0 Nothing []
         , _skillsState = SkillsState [] 0 Nothing
         , _agentsState = AgentsState [] 0 Nothing []
         , _approvalsState = ApprovalsState [] [] 0 Nothing
@@ -154,6 +154,9 @@ handleEvent _ (AppEvent (KnowledgeLoaded projects notes prefs)) = do
   modify $ knowledgeState . ksNotes .~ notes
   modify $ knowledgeState . ksPrefs .~ prefs
   modify $ knowledgeState . ksSelected .~ 0
+  modify $ knowledgeState . ksProjectChildren .~ []
+handleEvent _ (AppEvent (ProjectChildrenLoaded children)) = do
+  modify $ knowledgeState . ksProjectChildren .~ children
 handleEvent _ (AppEvent (SkillsLoaded skills)) = do
   modify $ skillsState . ssSkills .~ skills
   modify $ skillsState . ssSelected .~ 0
@@ -199,7 +202,7 @@ handleEvent chan (VtyEvent (V.EvKey V.KEnter [])) = do
   case s ^. currentView of
     ChatView -> handleChatEnter chan
     ActivitiesView -> handleActivitiesEvent (V.EvKey V.KEnter [])
-    KnowledgeView -> handleKnowledgeEvent (V.EvKey V.KEnter [])
+    KnowledgeView -> handleKnowledgeEnter chan
     SkillsView -> handleSkillsEvent (V.EvKey V.KEnter [])
     AgentsView -> handleAgentsEnter chan
     ApprovalsView -> handleApprovalsEvent (V.EvKey V.KEnter [])
@@ -212,7 +215,11 @@ handleEvent chan (VtyEvent e) = do
       case action of
         LoadMore -> triggerLoadMoreActivities chan
         NoAction -> pure ()
-    KnowledgeView -> handleKnowledgeEvent e
+    KnowledgeView -> do
+      action <- handleKnowledgeEventWithAction e
+      case action of
+        LoadProjectChildren projectId -> triggerLoadProjectChildren chan projectId
+        KnowledgeNoAction -> pure ()
     SkillsView -> handleSkillsEvent e
     AgentsView -> handleAgentsEvent e
     ApprovalsView -> handleApprovalsEvent e
@@ -248,6 +255,8 @@ triggerDataLoad chan = do
         writeBChan chan (ActivitiesAppended acts hasMore)
       DL.KnowledgeLoaded projects notes prefs ->
         writeBChan chan (KnowledgeLoaded projects notes prefs)
+      DL.ProjectChildrenLoaded children ->
+        writeBChan chan (ProjectChildrenLoaded children)
       DL.SkillsLoaded skills ->
         writeBChan chan (SkillsLoaded skills)
       DL.AgentsLoaded agents ->
@@ -291,6 +300,28 @@ prevView KnowledgeView = ActivitiesView
 prevView SkillsView = KnowledgeView
 prevView AgentsView = SkillsView
 prevView ApprovalsView = AgentsView
+
+-- | Handle Enter key in knowledge view - load project children when expanding a project
+handleKnowledgeEnter :: BChan AppEvent -> EventM Name AppState ()
+handleKnowledgeEnter chan = do
+  action <- handleKnowledgeEventWithAction (V.EvKey V.KEnter [])
+  case action of
+    LoadProjectChildren projectId -> triggerLoadProjectChildren chan projectId
+    KnowledgeNoAction -> pure ()
+
+-- | Trigger loading project children
+triggerLoadProjectChildren :: BChan AppEvent -> T.Text -> EventM Name AppState ()
+triggerLoadProjectChildren chan projectId = do
+  s <- get
+  let cfg = s ^. clientConfig
+  void $ liftIO $ async $ do
+    result <- DL.loadProjectChildren cfg projectId
+    case result of
+      DL.ProjectChildrenLoaded children ->
+        writeBChan chan (ProjectChildrenLoaded children)
+      DL.LoadError msg ->
+        writeBChan chan (LoadError msg)
+      _ -> pure ()
 
 -- | Handle Enter key in agents view - load sessions when expanding
 handleAgentsEnter :: BChan AppEvent -> EventM Name AppState ()

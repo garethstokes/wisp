@@ -11,7 +11,7 @@ import Data.Text (Text)
 import Data.Time (UTCTime)
 import GHC.Generics (Generic)
 
-data DocumentType = ProjectDoc | NoteDoc | PreferenceDoc
+data DocumentType = ProjectDoc | NoteDoc | PreferenceDoc | ProjectKnowledgeDoc
   deriving (Show, Eq, Generic)
 
 instance FromJSON DocumentType where
@@ -19,12 +19,14 @@ instance FromJSON DocumentType where
     "project" -> pure ProjectDoc
     "note" -> pure NoteDoc
     "preference" -> pure PreferenceDoc
+    "project_knowledge" -> pure ProjectKnowledgeDoc
     other -> fail $ "Unknown document type: " <> show other
 
 instance ToJSON DocumentType where
   toJSON ProjectDoc = "project"
   toJSON NoteDoc = "note"
   toJSON PreferenceDoc = "preference"
+  toJSON ProjectKnowledgeDoc = "project_knowledge"
 
 data Document = Document
   { documentId :: Text
@@ -34,6 +36,7 @@ data Document = Document
   , documentActive :: Bool
   , documentCreatedAt :: UTCTime
   , documentLastActivityAt :: Maybe UTCTime
+  , documentParentId :: Maybe Text
   } deriving (Show, Eq, Generic)
 
 instance FromJSON Document where
@@ -45,6 +48,7 @@ instance FromJSON Document where
     <*> v .: "active"
     <*> v .: "created_at"
     <*> v .:? "last_activity_at"
+    <*> v .:? "parent_id"
 
 data ProjectData = ProjectData
   { projectName :: Text

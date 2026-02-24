@@ -46,6 +46,7 @@ module Tui.Types
   , ksPrefs
   , ksSelected
   , ksExpanded
+  , ksProjectChildren
   -- Skills lenses
   , ssSkills
   , ssSelected
@@ -94,6 +95,7 @@ data AppEvent
   | ActivitiesLoaded [Activity] (Maybe ActivityMetrics) Bool  -- activities, metrics, hasMore
   | ActivitiesAppended [Activity] Bool  -- more activities, hasMore
   | KnowledgeLoaded [Document] [Document] [Document]  -- projects, notes, prefs
+  | ProjectChildrenLoaded [Document]  -- children of a project
   | SkillsLoaded [Skill]
   | AgentsLoaded [AgentInfo]
   | AgentSessionsLoaded Text [SessionSummary]  -- agent name, sessions
@@ -157,6 +159,7 @@ data KnowledgeState = KnowledgeState
   , _ksPrefs :: [Document]
   , _ksSelected :: Int
   , _ksExpanded :: Maybe Int
+  , _ksProjectChildren :: [Document]  -- Children of currently expanded project
   } deriving (Show)
 
 makeLenses ''KnowledgeState

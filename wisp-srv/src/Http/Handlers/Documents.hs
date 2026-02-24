@@ -7,6 +7,7 @@ module Http.Handlers.Documents
   , postProjectLibrarian
   , postProjectLibrarianByTag
   , getProjectSuggestions
+  , getProjectChildrenHandler
   , getNotesList
   , postNote
   , getPrefsList
@@ -209,6 +210,13 @@ getProjectSuggestions = do
       , "sample_activity_ids" .= map unEntityId (psSampleActivityIds s)
       , "activity_count" .= psActivityCount s
       ]
+
+-- | GET /api/projects/:id/children - get child documents for a project
+getProjectChildrenHandler :: ActionT (ReaderT Env IO) ()
+getProjectChildrenHandler = do
+  docId <- captureParam "id"
+  children <- lift $ Db.getProjectChildren (EntityId docId)
+  json $ object ["children" .= children, "count" .= length children]
 
 --------------------------------------------------------------------------------
 -- Note Endpoints

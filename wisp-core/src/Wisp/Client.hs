@@ -8,6 +8,7 @@ module Wisp.Client
   , getProjects
   , getNotes
   , getPreferences
+  , getProjectChildren
   , createProject
   , createNote
   , setPreference
@@ -154,6 +155,7 @@ getDocuments cfg docType = do
         ProjectDoc -> "/api/projects"
         NoteDoc -> "/api/notes"
         PreferenceDoc -> "/api/preferences"
+        ProjectKnowledgeDoc -> "/api/projects"  -- Not directly queryable, use getProjectChildren
   result <- httpGet cfg path
   pure $ case result of
     Left e -> Left e
@@ -163,6 +165,7 @@ getDocuments cfg docType = do
               ProjectDoc -> "projects"
               NoteDoc -> "notes"
               PreferenceDoc -> "preferences"
+              ProjectKnowledgeDoc -> "children"  -- Not used directly
         in case KM.lookup key obj of
           Just (Aeson.Array arr) -> case traverse Aeson.fromJSON arr of
             Aeson.Success docs -> Right $ toList docs
@@ -178,6 +181,20 @@ getNotes cfg = getDocuments cfg NoteDoc
 
 getPreferences :: ClientConfig -> IO (Either ClientError [Document])
 getPreferences cfg = getDocuments cfg PreferenceDoc
+
+-- | Get child documents for a project (knowledge docs)
+getProjectChildren :: ClientConfig -> Text -> IO (Either ClientError [Document])
+getProjectChildren cfg projectId = do
+  result <- httpGet cfg $ "/api/projects/" <> T.unpack projectId <> "/children"
+  pure $ case result of
+    Left e -> Left e
+    Right val -> case val of
+      Aeson.Object obj -> case KM.lookup "children" obj of
+        Just (Aeson.Array arr) -> case traverse Aeson.fromJSON arr of
+          Aeson.Success docs -> Right $ toList docs
+          _ -> Left $ ParseError "Failed to parse children"
+        _ -> Left $ ParseError "Missing children key"
+      _ -> Left $ ParseError "Expected object"
 
 createProject :: ClientConfig -> Text -> Text -> IO (Either ClientError Text)
 createProject cfg name projType = do

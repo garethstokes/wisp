@@ -1,6 +1,8 @@
 module Tui.Views.Knowledge
   ( knowledgeWidget
   , handleKnowledgeEvent
+  , handleKnowledgeEventWithAction
+  , KnowledgeAction(..)
   ) where
 
 import Brick
@@ -15,7 +17,13 @@ import Lens.Micro ((^.), (.~), (%~))
 
 import Tui.Types
 import Tui.Widgets.Scroll (handleViewportScroll)
-import Wisp.Client (Document(..))
+import Wisp.Client (Document(..), DocumentType(..))
+
+-- | Actions that can be triggered from knowledge view
+data KnowledgeAction
+  = LoadProjectChildren Text  -- Load children for project with given ID
+  | KnowledgeNoAction
+  deriving (Show, Eq)
 
 -- | Knowledge view widget
 knowledgeWidget :: KnowledgeState -> Widget Name
@@ -121,11 +129,11 @@ detailView ks idx =
     Just doc -> vBox
       [ txt "[Esc/h to return]"
       , txt ""
-      , viewport KnowledgeDetail Vertical $ documentDetailWidget doc
+      , viewport KnowledgeDetail Vertical $ documentDetailWidget doc (ks ^. ksProjectChildren)
       ]
 
-documentDetailWidget :: Document -> Widget Name
-documentDetailWidget doc = vBox
+documentDetailWidget :: Document -> [Document] -> Widget Name
+documentDetailWidget doc children = vBox $
   [ txt $ "ID: " <> documentId doc
   , txt ""
   , case documentData doc of
@@ -136,7 +144,41 @@ documentDetailWidget doc = vBox
   , txt $ "Active: " <> if documentActive doc then "yes" else "no"
   , txt $ "Created: " <> T.pack (show (documentCreatedAt doc))
   , txt $ "Last activity: " <> maybe "none" (T.pack . show) (documentLastActivityAt doc)
-  ]
+  ] ++ projectChildrenSection doc children
+
+-- | Render project children section (knowledge documents)
+projectChildrenSection :: Document -> [Document] -> [Widget Name]
+projectChildrenSection doc children
+  | documentType doc /= ProjectDoc = []
+  | null children =
+      [ txt ""
+      , withAttr (attrName "mdHeader") $ txt "Knowledge Documents"
+      , txt "  No knowledge documents yet."
+      , txt "  Run 'wisp-cli librarian run' to generate them."
+      ]
+  | otherwise =
+      [ txt ""
+      , withAttr (attrName "mdHeader") $ txt "Knowledge Documents"
+      ] ++ map renderKnowledgeChild children
+
+-- | Render a knowledge document child
+renderKnowledgeChild :: Document -> Widget Name
+renderKnowledgeChild doc =
+  let kind = extractField "kind" (documentData doc)
+      kindLabel = case kind of
+        "product_research" -> "Product Research"
+        "roadmap" -> "Roadmap"
+        "architecture" -> "Architecture"
+        "activity_log" -> "Activity Log"
+        _ -> kind
+      summary = extractField "summary" (documentData doc)
+      shortSummary = if T.length summary > 80
+                     then T.take 77 summary <> "..."
+                     else summary
+  in vBox
+    [ txt $ "  " <> kindLabel <> ":"
+    , txt $ "    " <> (if T.null shortSummary then "(no summary)" else shortSummary)
+    ]
 
 renderField :: (KM.Key, Value) -> Widget Name
 renderField (key, val) =
@@ -163,36 +205,57 @@ extractField _ _ = ""
 -- | Handle knowledge-specific events
 handleKnowledgeEvent :: V.Event -> EventM Name AppState ()
 handleKnowledgeEvent evt = do
+  _ <- handleKnowledgeEventWithAction evt
+  pure ()
+
+-- | Handle knowledge-specific events, returning an action
+handleKnowledgeEventWithAction :: V.Event -> EventM Name AppState KnowledgeAction
+handleKnowledgeEventWithAction evt = do
   s <- get
   case s ^. knowledgeState . ksExpanded of
-    Just _ -> handleDetailEvent evt
-    Nothing -> handleListEvent evt
+    Just _ -> do
+      handleDetailEvent evt
+      pure KnowledgeNoAction
+    Nothing -> handleListEventWithAction evt
 
-handleListEvent :: V.Event -> EventM Name AppState ()
-handleListEvent (V.EvKey (V.KChar '1') []) =
+handleListEventWithAction :: V.Event -> EventM Name AppState KnowledgeAction
+handleListEventWithAction (V.EvKey (V.KChar '1') []) = do
   modify $ knowledgeState . ksCurrentTab .~ ProjectsTab
-handleListEvent (V.EvKey (V.KChar '2') []) =
+  pure KnowledgeNoAction
+handleListEventWithAction (V.EvKey (V.KChar '2') []) = do
   modify $ knowledgeState . ksCurrentTab .~ NotesTab
-handleListEvent (V.EvKey (V.KChar '3') []) =
+  pure KnowledgeNoAction
+handleListEventWithAction (V.EvKey (V.KChar '3') []) = do
   modify $ knowledgeState . ksCurrentTab .~ PrefsTab
-handleListEvent (V.EvKey (V.KChar 'j') []) = do
+  pure KnowledgeNoAction
+handleListEventWithAction (V.EvKey (V.KChar 'j') []) = do
   s <- get
   let docs = currentDocs' (s ^. knowledgeState)
       maxIdx = length docs - 1
   modify $ knowledgeState . ksSelected %~ (\i -> min (i + 1) (max 0 maxIdx))
-handleListEvent (V.EvKey (V.KChar 'k') []) =
+  pure KnowledgeNoAction
+handleListEventWithAction (V.EvKey (V.KChar 'k') []) = do
   modify $ knowledgeState . ksSelected %~ (\i -> max 0 (i - 1))
-handleListEvent (V.EvKey V.KEnter []) = do
+  pure KnowledgeNoAction
+handleListEventWithAction (V.EvKey V.KEnter []) = expandProjectWithAction
+handleListEventWithAction (V.EvKey (V.KChar 'l') []) = expandProjectWithAction
+handleListEventWithAction evt = do
+  _ <- handleViewportScroll KnowledgeList evt
+  pure KnowledgeNoAction
+
+-- | Expand a project and return action to load children if it's a project
+expandProjectWithAction :: EventM Name AppState KnowledgeAction
+expandProjectWithAction = do
   s <- get
   let idx = s ^. knowledgeState . ksSelected
+      docs = currentDocs' (s ^. knowledgeState)
+      tab = s ^. knowledgeState . ksCurrentTab
   modify $ knowledgeState . ksExpanded .~ Just idx
-handleListEvent (V.EvKey (V.KChar 'l') []) = do
-  s <- get
-  let idx = s ^. knowledgeState . ksSelected
-  modify $ knowledgeState . ksExpanded .~ Just idx
-handleListEvent evt = do
-  handled <- handleViewportScroll KnowledgeList evt
-  if handled then pure () else pure ()
+  modify $ knowledgeState . ksProjectChildren .~ []  -- Clear children
+  -- If we're in projects tab, return action to load children
+  if tab == ProjectsTab && idx < length docs
+    then pure $ LoadProjectChildren (documentId (docs !! idx))
+    else pure KnowledgeNoAction
 
 handleDetailEvent :: V.Event -> EventM Name AppState ()
 handleDetailEvent (V.EvKey V.KEsc []) =
