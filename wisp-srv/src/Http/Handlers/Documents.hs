@@ -4,6 +4,8 @@ module Http.Handlers.Documents
   , postProject
   , postProjectArchive
   , postProjectReflect
+  , postProjectLibrarian
+  , postProjectLibrarianByTag
   , getProjectSuggestions
   , getNotesList
   , postNote
@@ -27,6 +29,7 @@ import Domain.Document
 import qualified Data.Aeson as Aeson
 import qualified Infra.Db.Document as Db
 import Skills.Reflection (runProjectReflection, ReflectionResult(..), detectProjectClusters, ProjectSuggestion(..), ClusterKey(..))
+import qualified Skills.Librarian as Librarian
 
 --------------------------------------------------------------------------------
 -- Request types
@@ -146,6 +149,47 @@ postProjectReflect = do
       , "status" .= rrUpdatedStatus r
       , "activities_processed" .= rrActivitiesProcessed r
       ]
+
+-- | POST /api/projects/librarian - run librarian on all projects
+postProjectLibrarian :: ActionT (ReaderT Env IO) ()
+postProjectLibrarian = do
+  results <- lift Librarian.runLibrarian
+  let response = object
+        [ "status" .= ("completed" :: Text)
+        , "projects_processed" .= length results
+        , "results" .= map librarianResultToJson results
+        ]
+  json response
+
+-- | POST /api/projects/librarian/:tag - run librarian for a single project by tag
+postProjectLibrarianByTag :: ActionT (ReaderT Env IO) ()
+postProjectLibrarianByTag = do
+  tag <- captureParam "tag"
+  mDoc <- lift $ Db.getProjectByTag tag
+  case mDoc of
+    Nothing -> do
+      status status404
+      json $ object ["error" .= ("Project not found" :: Text)]
+    Just doc -> do
+      mResult <- lift $ Librarian.runLibrarianForProject doc
+      case mResult of
+        Nothing -> json $ object
+          [ "status" .= ("skipped" :: Text)
+          , "message" .= ("No activities or unable to process" :: Text)
+          ]
+        Just result -> json $ object
+          [ "status" .= ("completed" :: Text)
+          , "result" .= librarianResultToJson result
+          ]
+
+-- | Convert LibrarianResult to JSON
+librarianResultToJson :: Librarian.LibrarianResult -> Aeson.Value
+librarianResultToJson r = object
+  [ "project_id" .= unEntityId (Librarian.lrProjectId r)
+  , "project_name" .= Librarian.lrProjectName r
+  , "updated" .= map show (Librarian.lrUpdatedDocs r)
+  , "skipped" .= map show (Librarian.lrSkippedDocs r)
+  ]
 
 -- | GET /api/projects/suggestions - get new project suggestions based on activity clusters
 getProjectSuggestions :: ActionT (ReaderT Env IO) ()

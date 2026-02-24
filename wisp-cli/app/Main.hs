@@ -34,6 +34,7 @@ data Command
   | Poll
   | Classify
   | Reflect                       -- Run project reflection
+  | Librarian (Maybe Text)        -- Run project librarian (optional project tag)
   | Inbox
   | Review
   | Approve Text
@@ -116,6 +117,7 @@ commandParser =
         <> command "poll" (info (pure Poll) (progDesc "Fetch new emails and calendar events now"))
         <> command "classify" (info (pure Classify) (progDesc "Run classification on pending activities"))
         <> command "reflect" (info (pure Reflect) (progDesc "Run project reflection (synthesize summaries from activities)"))
+        <> command "librarian" (info librarianParser (progDesc "Run project librarian to update knowledge documents"))
         <> command "auth" (info authParser (progDesc "Add an account via OAuth (google or github)"))
         <> command "runs" (info (pure Runs) (progDesc "List recent agent runs"))
         <> command "run" (info runParser (progDesc "Show full details for an agent run"))
@@ -225,6 +227,9 @@ prefSetParser = PrefSet
   <$> strArgument (metavar "KEY" <> help "Preference key")
   <*> strArgument (metavar "VALUE" <> help "Preference value")
   <*> optional (strOption (long "context" <> metavar "CONTEXT"))
+
+librarianParser :: Parser Command
+librarianParser = Librarian <$> optional (strArgument (metavar "PROJECT" <> help "Project tag (run for all if not specified)"))
 
 authParser :: Parser Command
 authParser = Auth <$> subparser
@@ -339,6 +344,7 @@ main = do
     Poll -> runPoll
     Classify -> runClassify
     Reflect -> runReflect
+    Librarian mProject -> runLibrarian mProject
     Inbox -> runInbox tz
     Review -> runReview tz
     Approve aid -> runApprove aid
@@ -403,6 +409,8 @@ runHelp = do
   TIO.putStrLn "  poll                Fetch new emails and events now"
   TIO.putStrLn "  classify            Run classification on pending activities"
   TIO.putStrLn "  reflect             Run project reflection (synthesize summaries)"
+  TIO.putStrLn "  librarian           Run project librarian (update knowledge docs)"
+  TIO.putStrLn "  librarian PROJECT   Run librarian for a specific project"
   TIO.putStrLn "  auth google         Add a Google account via OAuth"
   TIO.putStrLn "  auth github         Add a GitHub account via OAuth"
   TIO.putStrLn "  runs                List recent agent runs"
@@ -1142,6 +1150,78 @@ showReflectionResult (Object r) = do
   TIO.putStrLn $ "  [" <> getId <> "] " <> getStatus <> " (" <> showT getActivities <> " activities)"
   TIO.putStrLn $ "    " <> getSummary
 showReflectionResult _ = return ()
+
+runLibrarian :: Maybe Text -> IO ()
+runLibrarian mProject = do
+  manager <- newManager defaultManagerSettings
+  case mProject of
+    Nothing -> do
+      -- Run for all projects
+      TIO.putStrLn "Running librarian for all projects..."
+      initialReq <- parseRequest $ baseUrl <> "/api/projects/librarian"
+      let req = initialReq{method = "POST"}
+      response <- httpLbs req manager
+      case decode (responseBody response) of
+        Just (Object obj) -> do
+          let getNum key = case KM.lookup key obj of
+                Just (Number n) -> round n :: Int
+                _ -> 0
+          let projectsProcessed = getNum "projects_processed"
+          TIO.putStrLn $ "Projects processed: " <> showT projectsProcessed
+          -- Show details for each project
+          case KM.lookup "results" obj of
+            Just (Array results) | not (null results) -> do
+              TIO.putStrLn ""
+              TIO.putStrLn "Results:"
+              forM_ (toList results) showLibrarianResult
+            _ -> return ()
+        _ -> TIO.putStrLn "Librarian request sent"
+    Just projectTag -> do
+      -- Run for single project
+      TIO.putStrLn $ "Running librarian for project: " <> projectTag
+      initialReq <- parseRequest $ baseUrl <> "/api/projects/librarian/" <> unpack projectTag
+      let req = initialReq{method = "POST"}
+      response <- httpLbs req manager
+      case decode (responseBody response) of
+        Just (Object obj) -> do
+          case KM.lookup "error" obj of
+            Just (String err) -> TIO.putStrLn $ "Error: " <> err
+            _ -> case KM.lookup "status" obj of
+              Just (String "skipped") -> do
+                let msg = case KM.lookup "message" obj of
+                      Just (String m) -> m
+                      _ -> "No activities or unable to process"
+                TIO.putStrLn $ "Skipped: " <> msg
+              Just (String "completed") -> do
+                TIO.putStrLn "Completed!"
+                case KM.lookup "result" obj of
+                  Just r -> showLibrarianResult r
+                  _ -> return ()
+              _ -> TIO.putStrLn "Librarian request completed"
+        _ -> TIO.putStrLn "Librarian request sent"
+
+showLibrarianResult :: Value -> IO ()
+showLibrarianResult (Object r) = do
+  let getId = case KM.lookup "project_id" r of
+        Just (String s) -> T.take 8 s
+        _ -> "?"
+  let getName = case KM.lookup "project_name" r of
+        Just (String s) -> s
+        _ -> "(unknown)"
+  let getUpdated = case KM.lookup "updated" r of
+        Just (Array items) -> [s | String s <- toList items]
+        _ -> []
+  let getSkipped = case KM.lookup "skipped" r of
+        Just (Array items) -> [s | String s <- toList items]
+        _ -> []
+  TIO.putStrLn $ "  [" <> getId <> "] " <> getName
+  if null getUpdated
+    then TIO.putStrLn "    Updated: (none)"
+    else TIO.putStrLn $ "    Updated: " <> T.intercalate ", " getUpdated
+  if null getSkipped
+    then return ()
+    else TIO.putStrLn $ "    Skipped: " <> T.intercalate ", " getSkipped
+showLibrarianResult _ = return ()
 
 runPoll :: IO ()
 runPoll = do
