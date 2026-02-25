@@ -333,15 +333,26 @@ renderKnowledgeContent "activity_log" (Object obj) =
      ]
 renderKnowledgeContent _ _ = [txt "(unknown format)"]
 
--- | Render a labeled field with word wrapping
+-- | Render a labeled field (wraps long lines manually)
 renderLabeledField :: Text -> Text -> Widget Name
 renderLabeledField label value
   | T.null value = emptyWidget
-  | otherwise = vBox
+  | otherwise = vBox $
       [ txt ""
       , withAttr (attrName "mdBold") $ txt $ label <> ":"
-      , txtWrap value
-      ]
+      ] ++ map txt (wrapText 70 value)
+
+-- | Simple text wrapping at word boundaries
+wrapText :: Int -> Text -> [Text]
+wrapText width t = go (T.words t) []
+  where
+    go [] [] = []
+    go [] acc = [T.unwords (reverse acc)]
+    go (w:ws) acc
+      | T.null (T.unwords (reverse (w:acc))) = go ws (w:acc)
+      | T.length (T.unwords (reverse (w:acc))) <= width = go ws (w:acc)
+      | null acc = w : go ws []  -- Single word longer than width
+      | otherwise = T.unwords (reverse acc) : go (w:ws) []
 
 --------------------------------------------------------------------------------
 -- Helpers
