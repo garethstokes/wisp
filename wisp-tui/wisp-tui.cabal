@@ -25,6 +25,7 @@ executable wisp-tui
         Tui.Views.Skills
         Tui.Widgets.Layout
         Tui.Widgets.Scroll
+        Tui.Widgets.Time
     hs-source-dirs:   app, src
     default-language: GHC2021
     default-extensions:

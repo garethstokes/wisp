@@ -50,7 +50,7 @@ main = do
             , _csToolCalls = []
             }
         , _activitiesState = ActivitiesState [] 0 Nothing "" Nothing True False
-        , _knowledgeState = KnowledgeState ProjectsTab [] [] [] 0 Nothing []
+        , _knowledgeState = KnowledgeState ProjectsTab [] [] [] 0 Nothing [] 0 Nothing
         , _skillsState = SkillsState [] 0 Nothing
         , _agentsState = AgentsState [] 0 Nothing []
         , _approvalsState = ApprovalsState [] [] 0 Nothing
@@ -103,6 +103,14 @@ theMap = attrMap V.defAttr
   , (attrName "mdBold", V.withStyle V.defAttr V.bold)
   , (attrName "mdCode", fg V.yellow)
   , (attrName "mdBullet", fg V.cyan)
+  -- Project detail card styles
+  , (attrName "statusActive", fg V.green)
+  , (attrName "statusArchived", fg (V.rgbColor (128 :: Int) 128 128))
+  , (attrName "tag", fg V.cyan)
+  , (attrName "dim", fg (V.rgbColor (128 :: Int) 128 128))
+  , (attrName "selected", V.withStyle (fg V.white) V.bold)
+  , (attrName "cardBorder", fg V.blue)
+  , (attrName "hotkey", fg V.yellow)
   ]
 
 drawUI :: AppState -> [Widget Name]
@@ -120,7 +128,7 @@ viewContent :: AppState -> Widget Name
 viewContent s = case s ^. currentView of
   ChatView -> chatWidget (s ^. chatState)
   ActivitiesView -> activitiesWidget (s ^. currentTime) (s ^. activitiesState)
-  KnowledgeView -> knowledgeWidget (s ^. knowledgeState)
+  KnowledgeView -> knowledgeWidget (s ^. currentTime) (s ^. knowledgeState)
   SkillsView -> skillsWidget (s ^. skillsState)
   AgentsView -> agentsWidget (s ^. agentsState)
   ApprovalsView -> approvalsWidget (s ^. approvalsState)
@@ -219,6 +227,11 @@ handleEvent chan (VtyEvent e) = do
       action <- handleKnowledgeEventWithAction e
       case action of
         LoadProjectChildren projectId -> triggerLoadProjectChildren chan projectId
+        ViewActivitiesForTag tag -> do
+          -- Switch to activities view and set filter
+          modify $ currentView .~ ActivitiesView
+          modify $ activitiesState . asFilter .~ tag
+          triggerDataLoad chan
         KnowledgeNoAction -> pure ()
     SkillsView -> handleSkillsEvent e
     AgentsView -> handleAgentsEvent e
@@ -307,6 +320,10 @@ handleKnowledgeEnter chan = do
   action <- handleKnowledgeEventWithAction (V.EvKey V.KEnter [])
   case action of
     LoadProjectChildren projectId -> triggerLoadProjectChildren chan projectId
+    ViewActivitiesForTag tag -> do
+      modify $ currentView .~ ActivitiesView
+      modify $ activitiesState . asFilter .~ tag
+      triggerDataLoad chan
     KnowledgeNoAction -> pure ()
 
 -- | Trigger loading project children

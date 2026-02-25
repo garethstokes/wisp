@@ -9,27 +9,39 @@ import Brick
 import qualified Graphics.Vty as V
 import Data.Aeson (Value(..))
 import Data.Foldable (toList)
+import Data.List (intersperse)
 import qualified Data.Aeson.KeyMap as KM
 import Data.String (fromString)
 import Data.Text (Text)
 import qualified Data.Text as T
+import Data.Time (UTCTime)
 import Lens.Micro ((^.), (.~), (%~))
 
 import Tui.Types
 import Tui.Widgets.Scroll (handleViewportScroll)
+import Tui.Widgets.Time (relativeTime, humanDate)
 import Wisp.Client (Document(..), DocumentType(..))
 
 -- | Actions that can be triggered from knowledge view
 data KnowledgeAction
   = LoadProjectChildren Text  -- Load children for project with given ID
+  | ViewActivitiesForTag Text -- Navigate to activities filtered by tag
   | KnowledgeNoAction
   deriving (Show, Eq)
 
+--------------------------------------------------------------------------------
+-- Main Widget
+--------------------------------------------------------------------------------
+
 -- | Knowledge view widget
-knowledgeWidget :: KnowledgeState -> Widget Name
-knowledgeWidget ks = case ks ^. ksExpanded of
+knowledgeWidget :: Maybe UTCTime -> KnowledgeState -> Widget Name
+knowledgeWidget mNow ks = case ks ^. ksExpanded of
   Nothing -> listView ks
-  Just idx -> detailView ks idx
+  Just idx -> projectDetailView mNow ks idx
+
+--------------------------------------------------------------------------------
+-- List View (project/notes/prefs list)
+--------------------------------------------------------------------------------
 
 listView :: KnowledgeState -> Widget Name
 listView ks = vBox
@@ -120,65 +132,177 @@ renderPref selected idx doc =
     , txt context
     ]
 
-detailView :: KnowledgeState -> Int -> Widget Name
-detailView ks idx =
+--------------------------------------------------------------------------------
+-- Project Detail View (card-based layout)
+--------------------------------------------------------------------------------
+
+projectDetailView :: Maybe UTCTime -> KnowledgeState -> Int -> Widget Name
+projectDetailView mNow ks idx =
   let docs = currentDocs' ks
       mDoc = if idx < length docs then Just (docs !! idx) else Nothing
   in case mDoc of
     Nothing -> txt "Document not found"
-    Just doc -> vBox
-      [ txt "[Esc/h to return]"
+    Just doc -> case ks ^. ksDocExpanded of
+      -- Show expanded knowledge document
+      Just docIdx -> knowledgeDocExpandedView mNow ks doc docIdx
+      -- Show project card + document list
+      Nothing -> projectCardView mNow ks doc
+
+-- | Project card view with header and document list
+projectCardView :: Maybe UTCTime -> KnowledgeState -> Document -> Widget Name
+projectCardView mNow ks doc = vBox
+  [ withAttr (attrName "dim") $ txt "[Esc/h to return]  [a] view activities"
+  , txt ""
+  , viewport KnowledgeDetail Vertical $ vBox
+      [ projectHeaderCard mNow doc
       , txt ""
-      , viewport KnowledgeDetail Vertical $ documentDetailWidget doc (ks ^. ksProjectChildren)
+      , knowledgeDocsList mNow ks (ks ^. ksProjectChildren)
       ]
+  ]
 
-documentDetailWidget :: Document -> [Document] -> Widget Name
-documentDetailWidget doc children = vBox $
-  [ txt $ "ID: " <> documentId doc
-  , txt ""
-  , case documentData doc of
-      Object obj -> vBox $ map renderField (KM.toList obj)
-      _ -> txt "(no data)"
-  , txt ""
-  , txt $ "Tags: " <> T.intercalate ", " (documentTags doc)
-  , txt $ "Active: " <> if documentActive doc then "yes" else "no"
-  , txt $ "Created: " <> T.pack (show (documentCreatedAt doc))
-  , txt $ "Last activity: " <> maybe "none" (T.pack . show) (documentLastActivityAt doc)
-  ] ++ projectChildrenSection doc children
+-- | Render the project header card
+projectHeaderCard :: Maybe UTCTime -> Document -> Widget Name
+projectHeaderCard mNow doc =
+  let name = T.toUpper $ extractField "name" (documentData doc)
+      projType = extractField "type" (documentData doc)
+      status = extractField "status" (documentData doc)
+      activityCount = extractNumber "activity_count" (documentData doc)
+      participants = extractArray "participants" (documentData doc)
+      tags = documentTags doc
+      docId = documentId doc
+      created = documentCreatedAt doc
+      lastActivity = documentLastActivityAt doc
 
--- | Render project children section (knowledge documents)
-projectChildrenSection :: Document -> [Document] -> [Widget Name]
-projectChildrenSection doc children
-  | documentType doc /= ProjectDoc = []
-  | null children =
-      [ txt ""
-      , withAttr (attrName "mdHeader") $ txt "Knowledge Documents"
-      , txt "  No knowledge documents yet."
-      , txt "  Run 'wisp-cli librarian run' to generate them."
+      -- Status styling
+      statusWidget = if status == "active" || T.null status
+        then withAttr (attrName "statusActive") $ txt "active"
+        else withAttr (attrName "statusArchived") $ txt status
+
+      -- Format activity count
+      actCountText = T.pack (show activityCount) <> " activities"
+      actWidget = hBox [txt actCountText, withAttr (attrName "hotkey") $ txt " [a]"]
+
+      -- Format times
+      lastActivityText = case (mNow, lastActivity) of
+        (Just now, Just la) -> "Last active: " <> relativeTime now la
+        _ -> ""
+      createdText = "Created: " <> humanDate created
+
+      -- Tags
+      tagsWidget = hBox $ txt "Tags: " :
+        intersperse (txt " ") [withAttr (attrName "tag") $ txt t | t <- tags]
+
+      -- Participants
+      participantsWidget = if null participants
+        then emptyWidget
+        else vBox $ txt "Participants:" :
+          [txt $ "  - " <> p | p <- participants]
+
+  in vBox
+    [ -- Top line: name + status
+      hBox
+        [ withAttr (attrName "mdBold") $ txt $ "  " <> name
+        , fill ' '
+        , statusWidget
+        , txt "  "
+        ]
+    -- Type + ID line
+    , hBox
+        [ withAttr (attrName "dim") $ txt $ "  " <> projType <> " project"
+        , fill ' '
+        , withAttr (attrName "dim") $ txt docId
+        , txt "  "
+        ]
+    , txt $ "  " <> T.replicate 60 "─"
+    -- Stats line
+    , hBox
+        [ txt "  "
+        , actWidget
+        , txt "   •   "
+        , txt lastActivityText
+        ]
+    , txt $ "  " <> createdText
+    , txt ""
+    , txt "  " <+> tagsWidget
+    , participantsWidget
+    ]
+
+-- | Knowledge documents list (selectable)
+knowledgeDocsList :: Maybe UTCTime -> KnowledgeState -> [Document] -> Widget Name
+knowledgeDocsList mNow ks children = vBox $
+  [ hBox
+      [ withAttr (attrName "mdHeader") $ txt "Knowledge Documents"
+      , fill ' '
+      , withAttr (attrName "dim") $ txt "[j/k ↑↓ select, Enter view]"
       ]
-  | otherwise =
-      [ txt ""
-      , withAttr (attrName "mdHeader") $ txt "Knowledge Documents"
-      ] ++ map renderKnowledgeChild children
+  , txt ""
+  ] ++ if null children
+       then [txt "  No knowledge documents yet."
+            , withAttr (attrName "dim") $ txt "  Run 'wisp librarian <project-tag>' to generate them."
+            ]
+       else zipWith (renderKnowledgeDocItem mNow (ks ^. ksDocSelected)) [0..] children
 
--- | Render a knowledge document child with full content
-renderKnowledgeChild :: Document -> Widget Name
-renderKnowledgeChild doc =
-  let kind = extractField "kind" (documentData doc)
+-- | Render a knowledge document as a selectable list item
+renderKnowledgeDocItem :: Maybe UTCTime -> Int -> Int -> Document -> Widget Name
+renderKnowledgeDocItem mNow selected idx doc =
+  let isSelected = idx == selected
+      marker = if isSelected then "▸ " else "  "
+      kind = extractField "kind" (documentData doc)
       kindLabel = case kind of
         "product_research" -> "Product Research"
         "roadmap" -> "Roadmap"
         "architecture" -> "Architecture"
         "activity_log" -> "Activity Log"
         _ -> kind
-      content = renderKnowledgeContent kind (documentData doc)
-  in vBox $
-    [ txt ""
-    , withAttr (attrName "mdBold") $ txt $ "  " <> kindLabel
-    ] ++ map (\w -> padLeft (Pad 4) w) content
+      updatedAt = documentCreatedAt doc  -- Use created_at as proxy for now
+      updatedText = case mNow of
+        Just now -> "updated " <> relativeTime now updatedAt
+        Nothing -> ""
+      attr = if isSelected then attrName "selected" else attrName ""
+  in withAttr attr $ hBox
+    [ txt marker
+    , txt $ T.justifyLeft 25 ' ' kindLabel
+    , fill ' '
+    , withAttr (attrName "dim") $ txt updatedText
+    ]
+
+--------------------------------------------------------------------------------
+-- Knowledge Document Expanded View
+--------------------------------------------------------------------------------
+
+knowledgeDocExpandedView :: Maybe UTCTime -> KnowledgeState -> Document -> Int -> Widget Name
+knowledgeDocExpandedView _mNow _ks _parentDoc docIdx =
+  let children = _ks ^. ksProjectChildren
+      mDoc = if docIdx < length children then Just (children !! docIdx) else Nothing
+  in case mDoc of
+    Nothing -> txt "Document not found"
+    Just doc ->
+      let kind = extractField "kind" (documentData doc)
+          kindLabel = case kind of
+            "product_research" -> "Product Research"
+            "roadmap" -> "Roadmap"
+            "architecture" -> "Architecture"
+            "activity_log" -> "Activity Log"
+            _ -> kind
+          content = renderKnowledgeContent kind (documentData doc)
+      in vBox
+        [ withAttr (attrName "dim") $ txt "[Esc to return to project]"
+        , txt ""
+        , hBox
+            [ txt "┌─ "
+            , withAttr (attrName "mdHeader") $ txt kindLabel
+            , txt " "
+            , txt $ T.replicate 50 "─"
+            ]
+        , txt "│"
+        , viewport KnowledgeDetail Vertical $ vBox $
+            map (hBox . (txt "│  " :) . (:[])) content
+        , txt "│"
+        , txt $ "└" <> T.replicate 65 "─"
+        ]
 
 -- | Render content based on knowledge document kind
-renderKnowledgeContent :: T.Text -> Value -> [Widget Name]
+renderKnowledgeContent :: Text -> Value -> [Widget Name]
 renderKnowledgeContent "product_research" (Object obj) =
   let vision = extractFromObj "vision" obj
       valueProp = extractFromObj "value_proposition" obj
@@ -209,42 +333,52 @@ renderKnowledgeContent "activity_log" (Object obj) =
      ]
 renderKnowledgeContent _ _ = [txt "(unknown format)"]
 
--- | Extract text from object
-extractFromObj :: T.Text -> KM.KeyMap Value -> T.Text
-extractFromObj key obj = case KM.lookup (fromString $ T.unpack key) obj of
-  Just (String s) -> s
-  _ -> ""
-
 -- | Render a labeled field with word wrapping
-renderLabeledField :: T.Text -> T.Text -> Widget Name
+renderLabeledField :: Text -> Text -> Widget Name
 renderLabeledField label value
   | T.null value = emptyWidget
   | otherwise = vBox
-      [ withAttr (attrName "dim") $ txt $ label <> ":"
+      [ txt ""
+      , withAttr (attrName "mdBold") $ txt $ label <> ":"
       , txtWrap value
       ]
 
-renderField :: (KM.Key, Value) -> Widget Name
-renderField (key, val) =
-  let k = T.pack $ show key
-  in case val of
-    String s -> txt $ k <> ": " <> s
-    Array arr ->
-      -- Render arrays with each element on a new line
-      let items = toList arr
-      in vBox $ txt (k <> ":") : map renderArrayItem items
-    _ -> txt $ k <> ": " <> T.pack (show val)
-
-renderArrayItem :: Value -> Widget Name
-renderArrayItem val = case val of
-  String s -> txt $ "  - " <> s
-  _ -> txt $ "  - " <> T.pack (show val)
+--------------------------------------------------------------------------------
+-- Helpers
+--------------------------------------------------------------------------------
 
 extractField :: Text -> Value -> Text
 extractField key (Object obj) = case KM.lookup (fromString $ T.unpack key) obj of
   Just (String s) -> s
   _ -> ""
 extractField _ _ = ""
+
+extractNumber :: Text -> Value -> Int
+extractNumber key (Object obj) = case KM.lookup (fromString $ T.unpack key) obj of
+  Just (Number n) -> round n
+  _ -> 0
+extractNumber _ _ = 0
+
+extractArray :: Text -> Value -> [Text]
+extractArray key (Object obj) = case KM.lookup (fromString $ T.unpack key) obj of
+  Just (Array arr) -> [s | String s <- toList arr]
+  _ -> []
+extractArray _ _ = []
+
+extractFromObj :: Text -> KM.KeyMap Value -> Text
+extractFromObj key obj = case KM.lookup (fromString $ T.unpack key) obj of
+  Just (String s) -> s
+  _ -> ""
+
+currentDocs' :: KnowledgeState -> [Document]
+currentDocs' ks = case ks ^. ksCurrentTab of
+  ProjectsTab -> ks ^. ksProjects
+  NotesTab -> ks ^. ksNotes
+  PrefsTab -> ks ^. ksPrefs
+
+--------------------------------------------------------------------------------
+-- Event Handling
+--------------------------------------------------------------------------------
 
 -- | Handle knowledge-specific events
 handleKnowledgeEvent :: V.Event -> EventM Name AppState ()
@@ -257,11 +391,12 @@ handleKnowledgeEventWithAction :: V.Event -> EventM Name AppState KnowledgeActio
 handleKnowledgeEventWithAction evt = do
   s <- get
   case s ^. knowledgeState . ksExpanded of
-    Just _ -> do
-      handleDetailEvent evt
-      pure KnowledgeNoAction
+    Just _ -> case s ^. knowledgeState . ksDocExpanded of
+      Just _ -> handleDocExpandedEvent evt
+      Nothing -> handleProjectDetailEvent evt
     Nothing -> handleListEventWithAction evt
 
+-- | Events in the main list view
 handleListEventWithAction :: V.Event -> EventM Name AppState KnowledgeAction
 handleListEventWithAction (V.EvKey (V.KChar '1') []) = do
   modify $ knowledgeState . ksCurrentTab .~ ProjectsTab
@@ -303,23 +438,77 @@ expandProjectWithAction = do
       docs = currentDocs' (s ^. knowledgeState)
       tab = s ^. knowledgeState . ksCurrentTab
   modify $ knowledgeState . ksExpanded .~ Just idx
-  modify $ knowledgeState . ksProjectChildren .~ []  -- Clear children
-  -- If we're in projects tab, return action to load children
+  modify $ knowledgeState . ksProjectChildren .~ []
+  modify $ knowledgeState . ksDocSelected .~ 0
+  modify $ knowledgeState . ksDocExpanded .~ Nothing
   if tab == ProjectsTab && idx < length docs
     then pure $ LoadProjectChildren (documentId (docs !! idx))
     else pure KnowledgeNoAction
 
-handleDetailEvent :: V.Event -> EventM Name AppState ()
-handleDetailEvent (V.EvKey V.KEsc []) =
+-- | Events in project detail view (card + doc list)
+handleProjectDetailEvent :: V.Event -> EventM Name AppState KnowledgeAction
+handleProjectDetailEvent (V.EvKey V.KEsc []) = do
   modify $ knowledgeState . ksExpanded .~ Nothing
-handleDetailEvent (V.EvKey (V.KChar 'h') []) =
+  modify $ knowledgeState . ksDocSelected .~ 0
+  pure KnowledgeNoAction
+handleProjectDetailEvent (V.EvKey (V.KChar 'h') []) = do
   modify $ knowledgeState . ksExpanded .~ Nothing
-handleDetailEvent evt = do
-  handled <- handleViewportScroll KnowledgeDetail evt
-  if handled then pure () else pure ()
+  modify $ knowledgeState . ksDocSelected .~ 0
+  pure KnowledgeNoAction
+handleProjectDetailEvent (V.EvKey (V.KChar 'a') []) = do
+  -- View activities for this project
+  s <- get
+  let idx = s ^. knowledgeState . ksSelected
+      docs = s ^. knowledgeState . ksProjects
+  if idx < length docs
+    then do
+      let tags = documentTags (docs !! idx)
+      case tags of
+        (tag:_) -> pure $ ViewActivitiesForTag tag
+        [] -> pure KnowledgeNoAction
+    else pure KnowledgeNoAction
+handleProjectDetailEvent (V.EvKey (V.KChar 'j') []) = docMoveDown
+handleProjectDetailEvent (V.EvKey V.KDown []) = docMoveDown
+handleProjectDetailEvent (V.EvKey (V.KChar 'k') []) = docMoveUp
+handleProjectDetailEvent (V.EvKey V.KUp []) = docMoveUp
+handleProjectDetailEvent (V.EvKey V.KEnter []) = expandDocWithAction
+handleProjectDetailEvent (V.EvKey (V.KChar 'l') []) = expandDocWithAction
+handleProjectDetailEvent evt = do
+  _ <- handleViewportScroll KnowledgeDetail evt
+  pure KnowledgeNoAction
 
-currentDocs' :: KnowledgeState -> [Document]
-currentDocs' ks = case ks ^. ksCurrentTab of
-  ProjectsTab -> ks ^. ksProjects
-  NotesTab -> ks ^. ksNotes
-  PrefsTab -> ks ^. ksPrefs
+docMoveDown :: EventM Name AppState KnowledgeAction
+docMoveDown = do
+  s <- get
+  let children = s ^. knowledgeState . ksProjectChildren
+      maxIdx = length children - 1
+  modify $ knowledgeState . ksDocSelected %~ (\i -> min (i + 1) (max 0 maxIdx))
+  pure KnowledgeNoAction
+
+docMoveUp :: EventM Name AppState KnowledgeAction
+docMoveUp = do
+  modify $ knowledgeState . ksDocSelected %~ (\i -> max 0 (i - 1))
+  pure KnowledgeNoAction
+
+expandDocWithAction :: EventM Name AppState KnowledgeAction
+expandDocWithAction = do
+  s <- get
+  let docIdx = s ^. knowledgeState . ksDocSelected
+      children = s ^. knowledgeState . ksProjectChildren
+  if docIdx < length children
+    then do
+      modify $ knowledgeState . ksDocExpanded .~ Just docIdx
+      pure KnowledgeNoAction
+    else pure KnowledgeNoAction
+
+-- | Events in expanded document view
+handleDocExpandedEvent :: V.Event -> EventM Name AppState KnowledgeAction
+handleDocExpandedEvent (V.EvKey V.KEsc []) = do
+  modify $ knowledgeState . ksDocExpanded .~ Nothing
+  pure KnowledgeNoAction
+handleDocExpandedEvent (V.EvKey (V.KChar 'h') []) = do
+  modify $ knowledgeState . ksDocExpanded .~ Nothing
+  pure KnowledgeNoAction
+handleDocExpandedEvent evt = do
+  _ <- handleViewportScroll KnowledgeDetail evt
+  pure KnowledgeNoAction

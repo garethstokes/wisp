@@ -47,6 +47,8 @@ module Tui.Types
   , ksSelected
   , ksExpanded
   , ksProjectChildren
+  , ksDocSelected
+  , ksDocExpanded
   -- Skills lenses
   , ssSkills
   , ssSelected
@@ -160,6 +162,8 @@ data KnowledgeState = KnowledgeState
   , _ksSelected :: Int
   , _ksExpanded :: Maybe Int
   , _ksProjectChildren :: [Document]  -- Children of currently expanded project
+  , _ksDocSelected :: Int             -- Selected knowledge doc in project detail
+  , _ksDocExpanded :: Maybe Int       -- Expanded knowledge doc (viewing full content)
   } deriving (Show)
 
 makeLenses ''KnowledgeState
