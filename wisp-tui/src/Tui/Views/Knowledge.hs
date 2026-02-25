@@ -201,18 +201,11 @@ projectHeaderCard mNow doc =
   in vBox
     [ -- Top line: name + status
       hBox
-        [ withAttr (attrName "mdBold") $ txt $ "  " <> name
-        , fill ' '
+        [ withAttr (attrName "mdBold") $ txt $ "  " <> T.justifyLeft 50 ' ' name
         , statusWidget
-        , txt "  "
         ]
     -- Type + ID line
-    , hBox
-        [ withAttr (attrName "dim") $ txt $ "  " <> projType <> " project"
-        , fill ' '
-        , withAttr (attrName "dim") $ txt docId
-        , txt "  "
-        ]
+    , withAttr (attrName "dim") $ txt $ "  " <> T.justifyLeft 50 ' ' (projType <> " project") <> docId
     , txt $ "  " <> T.replicate 60 "─"
     -- Stats line
     , hBox
@@ -231,8 +224,7 @@ projectHeaderCard mNow doc =
 knowledgeDocsList :: Maybe UTCTime -> KnowledgeState -> [Document] -> Widget Name
 knowledgeDocsList mNow ks children = vBox $
   [ hBox
-      [ withAttr (attrName "mdHeader") $ txt "Knowledge Documents"
-      , fill ' '
+      [ withAttr (attrName "mdHeader") $ txt $ T.justifyLeft 40 ' ' "Knowledge Documents"
       , withAttr (attrName "dim") $ txt "[j/k ↑↓ select, Enter view]"
       ]
   , txt ""
@@ -259,12 +251,7 @@ renderKnowledgeDocItem mNow selected idx doc =
         Just now -> "updated " <> relativeTime now updatedAt
         Nothing -> ""
       attr = if isSelected then attrName "selected" else attrName ""
-  in withAttr attr $ hBox
-    [ txt marker
-    , txt $ T.justifyLeft 25 ' ' kindLabel
-    , fill ' '
-    , withAttr (attrName "dim") $ txt updatedText
-    ]
+  in withAttr attr $ txt $ marker <> T.justifyLeft 30 ' ' kindLabel <> updatedText
 
 --------------------------------------------------------------------------------
 -- Knowledge Document Expanded View
